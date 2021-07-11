@@ -1,0 +1,1363 @@
+---
+title: "MonoExpr.proj"
+author: "Fu Ruiqing"
+date: "3/25/2021"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, tidy = TRUE, eval = T, cache = T, highlight = T, fig.keep = "last", cache.path = './knitr_cache/', cache.lazy = TRUE, fig.show = "hold", fig.path = "./Figures.v3/", fig.width = 7, fig.height = 5,  fig.align = 'left', warning = FALSE)
+setwd('/data/jinwf/rqfu/Workspace/MonoallelicExpr')
+```
+
+## Envrionment Preperation    
+
+The working directory is ***`r getwd()`***.    
+
+### Loading required libraries    
+```{r Library, include=F}
+library(tidyverse)
+library(wesanderson,lib.loc = '~/R/x86_64-redhat-linux-gnu-library/3.5')
+library(RColorBrewer)
+library(UpSetR,lib.loc='~/R/x86_64-redhat-linux-gnu-library/3.5')
+source('~/script/Rscript/vioplot.Rscript')
+```
+
+## R functions
+```{r Rfunctions}
+
+plotSite_on_Tsne <- function(site, cell_cri4plot = 50){
+	## Temporal plot
+	s='S3'
+	ss = subset(hetSNV.cAR.filt[[s]], id == site)
+	if(nrow(ss) < cell_cri4plot){stop("Not enough cells")}
+	S3.expr.ss = subset(S3.expr, Barcode %in% subset(hetSNV.cAR.filt[[s]], id == site, select = cell, drop=T))
+	ss = ss[match(S3.expr.ss$Barcode, ss$cell),]
+	plot(1,1,type='n', xlim=c(0,5), ylim=c(0,6), axes=F, xlab='', ylab='')
+	text(2,4, labels = site, cex = 0.5)
+	text(2,2, labels = paste(filter(annos, id==site)[,c(4:7,9)],sep='', collapse='-'), cex = 0.3)
+	plot(S3.expr$tsne.x, S3.expr$tsne.y, pch = 20, cex = pt, col = ident2rgb[as.character(S3.expr$ident)], lwd = 0, xlab = '', ylab = '', las = 1, cex.axis=1.33, axes = F)
+	box()
+#	axis(1, cex.axis = 1.33, las = 1, line = -0.15, labels=F, tck = -0.01)
+#	axis(2, cex.axis = 1.33, las = 1, line = -0.15, labels=F, tck = -0.01)
+	points(S3.expr.ss$tsne.x, S3.expr.ss$tsne.y, pch = 20, lwd = 0, cex = ifelse(ss$refN+ss$altN < 1, 0, ifelse(ss$refN+ss$altN == 1, pt_base, log10(ss$refN+ss$altN)+pt_base)), col = ifelse(S3.expr.ss[ss$cell,'ident'] == 10, NA, ifelse(ss$refN>0 & ss$altN==0, '#00008080', ifelse(ss$refN==0 & ss$altN>0, '#EE2C2C80', ifelse(ss$refN>0 & ss$altN>0, '#FF8C0095', NA)))))
+}
+
+```
+
+## Set for color palette
+```{r ColorPalette, include=T, echo=F}
+ident2celltype = c('0'='CTL','1' = 'CTL','2'='B','3'='B','4'='NK','5'='Myeloid','6'='B','7'='Ery','8'='TH','9'='pro-B','10'='B','11'='HSC','12'='Ery','13'='B')
+ident2celltype = read.table('Expr/cell_type_A11x3.txt', header=F, col.names = c('ident','celltype','color'), stringsAsFactors = F)
+ident2col = c('0'='palegreen1','1' = 'palegreen2','2'='turquoise1','3'='turquoise2','4'='palegreen4','5'='darkgoldenrod1','6'='turquoise','7'='tan4','8'='palegreen3','9'='royalblue1','10'='azure3','11'='blueviolet','12'='tan4','13'='turquoise3')
+ident2col = c('0'='palegreen','1' = 'palegreen','2'='turquoise','3'='turquoise','4'='palegreen4','5'='darkgoldenrod1','6'='turquoise','7'='tan4','8'='palegreen3','9'='royalblue1','10'='azure3','11'='blueviolet','12'='tan4','13'='turquoise') # for paper plot (concise color)
+ident2rgb = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'05'); names(ident2rgb) = names(ident2col)
+ident2rgb = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'05'); names(ident2rgb) = names(ident2col) # for paper plot (concise color)
+ident2rgb.d = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'80'); names(ident2rgb.d) = names(ident2col) # for paper plot (concise color)
+ident2rgb.d[c('11','5','4','2','0','7')]
+
+```
+
+## Data performance
+
++ Read in data from `r load("V2.RData")`.    
+ > Following *Rscript.A3.R*.
+
++ For **S3**, examine the *hetSNVs* in genes.
+ > using final filtered sites from **V2.RData**.
+```{r SNVs_in_Genes, include=T, echo = T, tidy=TRUE}
+## all filtered sites
+length(unique(hetSNV.cAR.filt$S3$cell)); length(unique(hetSNV.cAR.filt$S3$id))
+# 7244 cells; 81979 sites
+
+## sites NOT in intergenic regions
+length(unique(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id), ! Func.refGene %in% intergenic)[['Gene.refGene']]))
+length(unique(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id), ! Func.refGene %in% intergenic)[['id']]))
+# 8589 unique genes; 70479 unique sites
+par(xpd=T, mar=c(4,5,4,5),  cex.axis=1.2, cex.lab=1.2)
+yMax=2500
+pos = barplot(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id), ! Func.refGene %in% intergenic)[['Gene.refGene']])), border='grey50', las = 1, names.arg=F, ylim=c(0,yMax), xlab='hetSNVs in gene', ylab = 'Number of genes')
+lines(pos[,1], yMax * cumsum(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id), ! Func.refGene %in% intergenic)[['Gene.refGene']])))/sum(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id), ! Func.refGene %in% intergenic)[['Gene.refGene']]))), type='l', lwd=2)
+axis(4, at = seq(0, yMax, length.out=5), labels=seq(0,1,length.out=5), las =1)
+
+## sites in exonic regions
+length(unique(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic')[['Gene.refGene']]))
+length(unique(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic' )[['id']]))
+# 1533 unique genes; 2239 unique sites
+par(xpd=T, mar=c(4,5,4,5),  cex.axis=1.2, cex.lab=1.2)
+yMax=1200
+pos = barplot(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic')[['Gene.refGene']])), border='grey50', las = 1, names.arg=F, ylim=c(0,yMax), xlab='hetSNVs in gene', ylab = 'Number of genes')
+lines(pos[,1], yMax * cumsum(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic')[['Gene.refGene']])))/sum(table(table(filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic')[['Gene.refGene']]))), type='l', lwd=2)
+axis(4, at = seq(0, yMax, length.out=5), labels=seq(0,1,length.out=5), las =1)
+
+## Extract exonic hetSNVs
+exonic_ids = filter(annos, id %in% unique(hetSNV.cAR.filt$S3$id),  Func.refGene == 'exonic')[['id']]
+
+s='S3'
+hetSNV.cAR.filt.exonic <- list()
+hetSNV.cAR.filt.exonic[[s]] = subset(hetSNV.cAR.filt[[s]], id %in% exonic_ids)
+
+length(unique(hetSNV.cAR.filt.exonic[[s]]$cell)); length(unique(hetSNV.cAR.filt.exonic[[s]]$id))
+# 7240 cells; 2239 sites
+
+hetSNV.cAR.filt.exonic.UMIaf <- list()
+hetSNV.cAR.filt.exonic.UMIaf[[s]] = (tapply(hetSNV.cAR.filt.exonic[[s]][,'altN'], hetSNV.cAR.filt.exonic[[s]][,'id'], sum)) / (tapply(hetSNV.cAR.filt.exonic[[s]][,'altN']+hetSNV.cAR.filt.exonic[[s]][,'refN'], hetSNV.cAR.filt.exonic[[s]][,'id'], sum))
+hetSNV.cAR.filt.exonic.UMIaf[[s]][is.na(hetSNV.cAR.filt.exonic.UMIaf[[s]])] <- 0
+
+```
+
++ **Exonic** hetSNVs.
+ + There are *2239* unique exnoic hetSNVs in *7240* cells.
+ + Most of the exonic hetSNVs (**76.65%**) are observed in only one gene, namely each gene with one representative hetSNV.
+ > Using these exonic hetSNVs to perform downstream analysis.
+
++ Imprinting genes.
+ + There are only 10 imprinting genes overlapped with the data, among which, only 4 are (validated) "Imprinted".
+ + The VAF is not as expected bimodal in the both ends.
+```{r imprinting_Gene, include=T, echo = T, tidy=TRUE}
+## all overlapped imprinting genes
+filter(annos, id %in% exonic_ids, Gene.refGene %in% intersect(filter(annos, id %in% exonic_ids)[['Gene.refGene']], imprintG$Gene))[['id']] 
+hetSNV.cAR.filt.exonic.UMIaf$S3[filter(annos, id %in% exonic_ids, Gene.refGene %in% intersect(filter(annos, id %in% exonic_ids)[['Gene.refGene']], imprintG$Gene))[['id']]]
+## (Validated) "Imprinted" genes
+subset(imprintG, Gene %in% intersect(filter(annos, id %in% exonic_ids)[['Gene.refGene']], imprintG$Gene) & Status == 'Imprinted', select=Gene, drop=T)
+filter(annos, id %in% exonic_ids, Gene.refGene %in% subset(imprintG, Gene %in% intersect(filter(annos, id %in% exonic_ids)[['Gene.refGene']], imprintG$Gene) & Status == 'Imprinted', select=Gene, drop=T))[['id']] 
+hetSNV.cAR.filt.exonic.UMIaf$S3[filter(annos, id %in% exonic_ids, Gene.refGene %in% subset(imprintG, Gene %in% intersect(filter(annos, id %in% exonic_ids)[['Gene.refGene']], imprintG$Gene) & Status == 'Imprinted', select=Gene, drop=T))[['id']]]
+
+```
+
++ Basic statistics.
+
+```{r basic_stat, include=T, echo = T, tidy=TRUE}
+sapply(hetSNV.cAR.filt.exonic, nrow)
+#      S3 
+# 177,735 
+
+### hetSNVs counts and cell counts at sample-level
+sapply(hetSNV.cAR.filt.exonic, function(x) {length(unique(x$id))}) # hetSNVs/sample
+#    S3
+# 2,239
+
+sapply(hetSNV.cAR.filt.exonic, function(x) {length(unique(x$cell))}) # cells/sample
+#   S3
+# 7240
+
+### hetSNVs counts at cell-level
+sapply(hetSNV.cAR.filt.exonic, function(x) {summary(as.vector(table(x$cell)))}) # hetSNVs in each cell
+#               S3
+#Min.      1.00000
+#1st Qu.  13.00000
+#Median   19.00000
+#Mean     24.54903
+#3rd Qu.  27.00000
+#Max.    204.00000
+
+sapply(hetSNV.cAR.filt.exonic, function(x) {summary(as.vector(table(x$id)))}) # cells contain each site
+#                S3
+#Min.       5.00000
+#1st Qu.    8.00000
+#Median    16.00000
+#Mean      79.38142
+#3rd Qu.   42.00000
+#Max.    6711.00000
+
+sapply(hetSNV.cAR.filt.exonic, function(x) {summary(tapply(x$UMI, as.factor(x$cell), sum))})
+               S3
+#Min.      1.00000
+#1st Qu.  18.00000
+#Median   30.00000
+#Mean     44.52901
+#3rd Qu.  46.00000
+#Max.    681.00000
+
+ sapply(hetSNV.cAR.filt.exonic, function(x) {summary(tapply(x$UMI, as.factor(x$id), sum))}) # hetSNV UMI           
+
+```
+
+```{r Mono_1, include=T, echo=T, tidy=TRUE}
+s='S3'
+pm_cri_f = 0.05   # criterion for pooled M.E.; fraction of minor allele
+pm_cri_c = 10  # criterion for pooled M.E.; cell number
+
+mono_1 <- list()
+p_ado = c(); p_diff = c()
+cf = names(which((table(hetSNV.cAR.filt.exonic[[s]]$id)) >= pm_cri_c))  # filtering by cell number; sites observed in at least pm_cri_c
+ss = subset(hetSNV.cAR.filt.exonic[[s]], id %in% cf)
+ss.refN = tapply(ss$refN, as.factor(ss$id), sum)
+ss.altN = tapply(ss$altN, as.factor(ss$id), sum)
+p_diff = p.adjust(apply(cbind(ss.refN, ss.altN), 1, function(x) {ifelse(sum(x) == 0, 1, chisq.test(matrix(c(ceiling(median(x)), x[1], ceiling(median(x)), x[2]), ncol=2))$p.value)}), method = 'BH')  # test for significantly deviated alleles w.r.t. the expected 0.5 ratio
+s.pm = cf[hetSNV.cAR.filt.exonic.UMIaf[[s]][cf] < pm_cri_f | hetSNV.cAR.filt.exonic.UMIaf[[s]][cf] > 1-pm_cri_f]  # simple mono. expr. allele determination, with MAF < pm_cri_f
+mono_1[[s]] = intersect(names(which(p_diff < 0.05)), s.pm)  # final defination of mono. expr. SNVs: significantly deviated in both alleles and with MAF < pm_cri_f (e.g., 5%)
+print(paste0(length(cf), '/', sum(p_diff < 0.05, na.rm=T), '/', length(mono_1[[s]])))
+
+```
+
++ Variant allele frequency (VAF)
+
+```{r VAF, include=T, echo = T, tidy=TRUE}
+s='S3'
+pm_cri_c = 10  # criterion for pooled M.E.; cell number
+par(mar=c(5,4,2,1)+0.1, cex.axis=1.2, cex.lab=1.2)
+p_diff = c()
+cf = names(which((table(hetSNV.cAR.filt.exonic[[s]]$id)) >= pm_cri_c))  # filtering by cell number; sites observed in at least pm_cri_c
+ss = subset(hetSNV.cAR.filt.exonic[[s]], id %in% cf)
+ss.refN = tapply(ss$refN, as.factor(ss$id), sum)
+ss.altN = tapply(ss$altN, as.factor(ss$id), sum)
+p_diff = p.adjust(apply(cbind(ss.refN, ss.altN), 1, function(x) {ifelse(sum(x) == 0, 1, chisq.test(matrix(c(ceiling(median(x)), x[1], ceiling(median(x)), x[2]), ncol=2))$p.value)}), method = 'BH')
+
+h.cols = apply(col2rgb(wes_palettes$Royal1), 2, function(x) {rgb(x[1], x[2], x[3], alpha = 200, maxColorValue=255)})
+#h.bg = hist(hetSNV.cAR.filt.exonic.UMIaf[[s]], breaks = 31, col = h.cols[1], xlab = 'Fraction of alt-allele UMIs/sample', ylab = 'Number of hetSNVs', main = '')
+h.bg = hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][cf], breaks = 31, col = h.cols[3], xlab = 'Fraction of alt-allele UMIs/sample', ylab = 'Number of exonic hetSNVs', main = '')
+hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][names(which(p_diff<0.05))], breaks = h.bg$breaks, col = h.cols[4], xlab = '', ylab = '', main = s, add=T)
+hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][mono_1[[s]]], breaks = h.bg$breaks, col = h.cols[2], xlab = '', ylab = '', main = s, add=T)
+
+h.bg = hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][cf], breaks = 51, col = h.cols[3], xlab = 'Fraction of alt-allele UMIs/sample', ylab = 'Number of exonic hetSNVs', main = '')
+hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][names(which(p_diff<0.05))], breaks = h.bg$breaks, col = h.cols[4], xlab = '', ylab = '', main = s, add=T)
+hist(hetSNV.cAR.filt.exonic.UMIaf[[s]][mono_1[[s]]], breaks = h.bg$breaks, col = h.cols[2], xlab = '', ylab = '', main = s, add=T)
+
+length(names(which(p_diff<0.05)))/length(cf)
+# 0.09728657
+
+```
+
+
+s='S2'
+
+ss1 = bkWGS.AD[[s]][as.numeric(bkWGS.AD[[s]][,6])/(as.numeric(bkWGS.AD[[s]][,6])+as.numeric(bkWGS.AD[[s]][,7])) > 0.4 & as.numeric(bkWGS.AD[[s]][,6])/(as.numeric(bkWGS.AD[[s]][,6])+as.numeric(bkWGS.AD[[s]][,7])) < 0.6 & as.numeric(bkWGS.AD[[s]][,6]) + as.numeric(bkWGS.AD[[s]][,7]) > 20,]
+ss2 = ss1[filter(annos, id %in% row.names(ss1), !is.na(avsnp147))[['id']],]
+ss3 = ss2[filter(annos, !is.na(`1000g_EAS.sites.2015_08`) & `1000g_EAS.sites.2015_08` > 0.4 & `1000g_EAS.sites.2015_08` < 0.6, id %in% row.names(ss2))[['id']],]
+ss4 = ss3[filter(annos, id %in% row.names(ss3), ! Func.refGene %in% intergenic)[['id']],]
+ss5 = ss3[filter(annos, id %in% row.names(ss3), Func.refGene == 'exonic' )[['id']],]
+
+zzz = ss5$refN+ss5$altN; names(zzz) = row.names(ss5)
+yyy = filter(annos, id %in% row.names(ss5))[['Gene.refGene']]
+ss6 = ss5[tapply(zzz, yyy, function(x) {names(which.max(x))}),]
+
+plot(density(ss3$refN/(ss3$refN+ss3$altN),na.rm=T))
+plot(density(ss4$refN/(ss4$refN+ss4$altN),na.rm=T))
+plot(density(ss5$refN/(ss5$refN+ss5$altN),na.rm=T))
+plot(density(ss6$refN/(ss6$refN+ss6$altN),na.rm=T))
+
+ss = subset(bkRNA.AD[[s]], id %in% row.names(ss5))
+plot(density(tapply(ss$altN, ss$id, sum) / (tapply(ss$refN, ss$id, sum) + tapply(ss$altN, ss$id, sum)), na.rm=T), xlab = 'Fraction of alt-allele UMI', ylab = 'Density', main = paste0('hetSNVs after dbSNP-kept + EASpolym(0.4,0.6) [bkRNA-S2]\n(', length(tapply(ss$altN, ss$id, sum)), ')'), lwd =2, las = 1, col = 'springgreen3')
+
+
+
+
+
+######### mono_1.type_spec
+
+```{r Celltype_spec, include=T, echo=T, tidy=TRUE}
+s='S3'
+S3.expr <- read.table('Expr/A11x3.expr',header=T, stringsAsFactors=F)
+S3.expr = data.frame(S3.expr, cellInfo[[s]][,c('Barcode','CellCluster','ReadsCount','SNVs','Muts')])
+S3.expr$Barcode = as.character(S3.expr$Barcode)
+S3.expr = subset(S3.expr, Barcode %in% unique(hetSNV.cAR.filt[[s]]$cell))
+table(S3.expr$ident); table(S3.expr$CellCluster); subset(S3.expr, CellCluster == 1,select=ident, drop=T)
+S3.celltypes <- list('T' = c('0','1','8'), 'B' = c('2','3','6','9','13'), 'NK' = '4', 'Myeloid' = '5', 'Ery' = c('7','12'), 'HSPC' = '11')
+
+pm_cri_f = 0.05   # criterion for pooled M.E.; fraction of minor allele
+pm_cri_c = 10  # criterion for pooled M.E.; cell number
+
+mono_1.type_spec <- list()
+pdf("Figures.v2/S3.celltype_specific.mono_1.pdf",height = 7, width = 7)
+for(ct in names(S3.celltypes)){
+	ces = subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T)
+	ss0 = subset(hetSNV.cAR.filt[[s]], cell %in% ces)
+	p_diff = c()
+	cf = names(which((table(ss0$id)) >= pm_cri_c))  # filtering by cell number; sites observed in at least pm_cri_c
+	ss = subset(ss0, id %in% cf)
+	ss.refN = tapply(ss$refN, as.factor(ss$id), sum)
+	ss.altN = tapply(ss$altN, as.factor(ss$id), sum)
+	ss.Fref = ss.refN[cf]/(ss.refN[cf] + ss.altN[cf])
+
+	p_diff = p.adjust(apply(cbind(ss.refN, ss.altN), 1, function(x) {ifelse(sum(x) == 0, 1, chisq.test(matrix(c(ceiling(median(x)), x[1], ceiling(median(x)), x[2]), ncol=2))$p.value)}), method = 'BH')  # test for significantly deviated alleles w.r.t. the expected 0.5 ratio
+
+	s.pm = cf[ss.Fref < pm_cri_f | ss.Fref > 1-pm_cri_f]
+
+	plot(1,1, type='n', axes=F, xlab='',ylab='', xlim=c(0,5), ylim=c(0,10))
+	text(1,7, paste0(s,'-',ct, ': ',signif(length(intersect(names(which(p_diff < 0.05)), s.pm))/length(cf)*100,4),'%'), cex = 0.8)
+	text(1,4, paste0('All/Sig/mono_1: ',length(cf), '/', sum(p_diff < 0.05, na.rm=T), '/', length(mono_1.type_spec[[ct]])))
+
+	plot(log(ss.refN+1), log(ss.altN+1) , pch = 20, cex = 0.7, col = ifelse(p_diff < 0.05 & names(ss.refN) %in% s.pm & ss.refN > ss.altN, wes_palettes$Darjeeling2[2], ifelse(p_diff < 0.05 & names(ss.refN) %in% s.pm & ss.refN < ss.altN, wes_palettes$Royal1[2], wes_palettes$Chevalier1[3])), lwd = 0.8, xlim=c(0, max(c(log(ss.refN+1), log(ss.altN+1)))), ylim = c(0, max(c(log(ss.refN+1), log(ss.altN+1)))), xlab = '', ylab = '', las = 1, main = '', cex.axis = 1.33)  # blue for ref, red for alt
+	mono_1.type_spec[[ct]] = intersect(names(which(p_diff < 0.05)), s.pm)
+	print(paste0(s,'-',ct, ': ',signif(length(intersect(names(which(p_diff < 0.05)), s.pm))/length(cf)*100,4),'%'))
+	# mono_1[[s]] = intersect(names(which(p_diff < 0.05)), s.pm)  # final defination of mono. expr. SNVs: significantly deviated in both alleles and with MAF < pm_cri_f (e.g., 5%)
+	print(paste0(length(cf), '/', sum(p_diff < 0.05, na.rm=T), '/', length(mono_1.type_spec[[ct]])))
+}
+dev.off()
+# "S3-T: 2.395%"
+# "14448/557/346"
+# "S3-B: 2.438%"
+# "23051/1029/562"
+# "S3-NK: 3.105%"
+# "2995/126/93"
+# "S3-Myeloid: 4.108%"
+# "1923/124/79"
+# "S3-Ery: 2.409%"
+# "3487/130/84"
+# "S3-HSPC: 4.341%"
+# "1958/119/85"
+fisher.test(matrix(c( ), ncol = 2))
+upset(fromList(list(
+'B'=mono_1.type_spec[['B']], 
+'T'=mono_1.type_spec[['T']], 
+'NK'=mono_1.type_spec[['NK']], 
+'Mye/Mono'=mono_1.type_spec[['Myeloid']], 
+'Ery'=mono_1.type_spec[['Ery']], 
+'HSPC'=mono_1.type_spec[['HSPC']])), number.angles = 30, point.size = 2, line.size = .7, mb.ratio = c(0.6,0.4), keep.order = T, text.scale = 1.3)
+
+pdf("Figures.v2/S3.celltype_specific.mono_1.rm_M1.pdf",height = 7, width = 7)
+barplot(sort(sapply(mono_1.type_spec, length)), col = ident2rgb.d[sapply(S3.celltypes, function(x) {x[1]})[names(sort(sapply(mono_1.type_spec, length)))]], border=NA, las =1)
+barplot(sapply(mono_1.type_spec, function(x) {length(intersect(mono_1$S3, x))})[names(sort(sapply(mono_1.type_spec, length)))], col = rgb(col2rgb('azure3')[1,1], col2rgb('azure3')[2,1], col2rgb('azure3')[3,1],alpha = 230 ,maxColorValue=255), border=NA, add=T, names.arg=F, axes=F)
+dev.off()
+
+mono.type_spec <- list()
+for(ct in names(mono_1.type_spec)){
+	mono.type_spec[[ct]] = setdiff(mono_1.type_spec[[ct]], mono_1$S3)
+}
+sapply(mono.type_spec, length)
+pdf("Figures.v2/Upset plot of cell type MAEs.1.pdf", height = 7, width = 8)
+tt.col = ident2col[c('2','0','4','5','7','11')]
+names(tt.col) = c('B','T','NK','Mye/Mono','Ery','HSPC')
+upset(fromList(list(
+'B'=mono.type_spec[['B']], 
+'T'=mono.type_spec[['T']], 
+'NK'=mono.type_spec[['NK']], 
+'Mye/Mono'=mono.type_spec[['Myeloid']], 
+'Ery'=mono.type_spec[['Ery']], 
+'HSPC'=mono.type_spec[['HSPC']])), nsets = 7, number.angles = 30, point.size = 3, line.size = 1, mb.ratio = c(0.65,0.35), keep.order = T, text.scale = 2.1, sets.bar.color = tt.col[c('B','T','NK','Ery','HSPC','Mye/Mono')])
+dev.off()
+
+for(ct in names(mono.type_spec)){write((filter(annos, id %in% mono.type_spec[[ct]], !Func.refGene %in% intergenic))[['Gene.refGene']], paste0('Figures.v2/S3.mono.',ct,'.genes.txt'))}
+
+pdf("Figures.v2/Figure.Metascape.pdf", height = 5, width = 7)
+#metasp.all = c('hsa05416' = -3.789, 'GO:0002764' = -2.599, 'GO:0002483' = -2.339, 'R-HSA-2262752' = -2.090, 'GO:0031669' = -2.028, 'ko04650' = -1.984, 'R-HSA-1280218' = -1.927) # log10(q)
+metasp.all = c('hsa05416' = -8.148089553, 'GO:0002764' = -5.878686277, 'GO:0002483' = -5.494268724, 'R-HSA-2262752' = -5.100437609, 'GO:0031669' =-4.939752221, 'ko04650' = -4.851384282, 'R-HSA-1280218' = -4.704347891) # log10(p)
+metasp.b = c('R-HSA-202430' = -5.628899113, 'WP231' = -3.546689557, 'WP179' = -3.208784484, 'GO:0051092' = -2.847817999, 'GO:0050657' = -2.584348239, 'GO:0030036' = -2.581289603)
+metasp.all.name = c('hsa05416\nViral myocarditis', 'GO:0002764\nimmune response-regulating signaling pathway', 'GO:0002483\nantigen processing and presentation of endogenous peptide antigen', 'R-HSA-2262752\nCellular responses to stress', 'GO:0031669\ncellular response to nutrient levels', 'ko04650\nNatural killer cell mediated cytotoxicity', 'R-HSA-1280218\nAdaptive Immune System')
+metasp.b.name = c('R-HSA-202430\nTranslocation of ZAP-70 to Immunological synapse', 'WP231\nTNF alpha Signaling Pathway', 'WP179\nCell Cycle', 'GO:0051092\npositive regulation of NF-kappaB transcription factor activity', 'GO:0050657\nnucleic acid transport', 'GO:0030036\nactin cytoskeleton organization')
+par(mar=c(2.1,10.1,1.1,10.6), omi = rep(0,4),xpd=T)
+plot(0,0,type='n',axes=F,xlab='',ylab='',xlim=c(0,8),ylim=c(0,25))
+abline(v=-log10(0.01), lty=1, col='grey70')
+pos = barplot(rev(c(metasp.all)*(-1)), horiz = T, col = rev(rep(c(paste0(wes_palettes$FantasticFox1[4],80)), c(length(metasp.all)))), border=NA, space=0.8, xlim=c(0,8), las = 1, names.arg = rev(sapply(strsplit(c(metasp.all.name), '\n'), function(x){x[1]})), cex.names = 1.2, cex.axis=1.1, add=T)
+text(0, pos[,1]+0.5, pos=4, labels = rev(sapply(strsplit(c(metasp.all.name), '\n'), function(x){x[2]})), cex=1, offset = 0.05, xpd=T)
+par(mar=c(2.1,10.1,1.1,10.6), omi = rep(0,4),xpd=T)
+plot(0,0,type='n',axes=F,xlab='',ylab='',xlim=c(0,6),ylim=c(0,25))
+abline(v=-log10(0.01), lty=1, col='grey70')
+pos = barplot(rev(c(metasp.b)*(-1)), horiz = T, col = rev(rep(c(ident2rgb.d[c('2')]), c(length(metasp.b)))), border=NA, space=0.8, xlim=c(0,6), las = 1, names.arg = rev(sapply(strsplit(c(metasp.b.name), '\n'), function(x){x[1]})), cex.names = 1.2, cex.axis=1.1, add=T)
+text(0, pos[,1]+0.5, pos=4, labels = rev(sapply(strsplit(c(metasp.b.name), '\n'), function(x){x[2]})), cex=1, offset = 0.05, xpd=T)
+dev.off()
+
+sites<-list()
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['HSPC']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['Myeloid']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['HSPC']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['HSPC']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['Myeloid']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['id']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Myeloid']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['Myeloid']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Myeloid']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['id']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Ery']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Myeloid']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['Ery']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Ery']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Myeloid']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['id']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['NK']], mono.type_spec[['B']]), mono.type_spec[['Myeloid']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['NK']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['NK']], mono.type_spec[['B']]), mono.type_spec[['Myeloid']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['id']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['B']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['B']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['B']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), ! Func.refGene %in% intergenic)[['id']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['T']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['B']]), ! Func.refGene %in% intergenic)[['Gene.refGene']]
+sites[['T']] = filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['T']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['B']]), ! Func.refGene %in% intergenic)[['id']]
+
+pdf("Figures.v2/Figure.CelltypeSpec.pdf", height = 2, width = 2)
+#sites = c('14:94379500', '6:31356429', '6:32584271', '6:32584309', '6:32757842', '6:170561961', '17:20895679', '19:49447099')
+par(mar=rep(0.3,4), cex.axis=1.2, cex.lab=1.2)
+pt = 0.3; pt_base = 1.2
+cell_cri4plot = 50
+for(ct in names(sites)){
+	plot(1,1,type='n', xlim=c(0,5), ylim=c(0,6), axes=F, xlab='', ylab='')
+	text(2,4, labels = ct, cex = 1)
+	for(site in sites[[ct]]){
+		ss = subset(hetSNV.cAR.filt[[s]], id == site)
+		if(nrow(ss) < cell_cri4plot){next}
+		plotSite_on_Tsne(site)
+	}
+}
+plot(rep(1,5), 1:5, axes=F, pch = 20, lwd = 0, col = 'grey45', cex = log10(c(1:5)) + pt_base, ylim=c(-7,12))
+dev.off()
+# select: 2:111484709, 19:52689883 (Ery; ZNF83), 7:139047064, 3:16398091 (B; RFTN1), 10:93702531, 15:57280019 (B; TCF12), 15:90496697, 16:89543164, 19:2274768, 3:13401128 (T; NUP210), 3:16512845, 5:54074919, 8:144844570 (T; ZNF7), 16:82170181
+
+### Celltype specific ME sites differentiation
+#### compare between pairs of celltypes on their shared hetSNVs (satisfied the pm_cri_c) that ME in test celltype but not in reference celltype with significance
+pm_cri_c = 10
+s='S3'
+cf.celltype <- list()
+for(ct in names(S3.celltypes)){
+	ces = subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T)
+	ss0 = subset(hetSNV.cAR.filt[[s]], cell %in% ces)
+	cf.celltype[[ct]] = names(which((table(ss0$id)) >= pm_cri_c))
+}
+
+cts=names(S3.celltypes)
+mono.celltype_diff <- list()
+mono.celltype_diff.mat <- matrix(0, ncol = length(cts), nrow = length(cts), dimnames= list(cts, cts))
+# row as test (ME) and column as reference (nonME)
+for(ri in 1:(length(cts)-1)){
+	for(ci in (ri+1):length(cts)){
+		ct.r = cts[ri]; ct.c = cts[ci]
+		sss = intersect(cf.celltype[[ct.r]], cf.celltype[[ct.c]])
+		rss = setdiff(intersect(mono.type_spec[[ct.r]], sss), mono.type_spec[[ct.c]])
+		css = setdiff(intersect(mono.type_spec[[ct.c]], sss), mono.type_spec[[ct.r]])
+
+		rss.r = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.r]], select=Barcode, drop=T) & id %in% rss)
+		rss.c = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.c]], select=Barcode, drop=T) & id %in% rss)
+		css.r = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.r]], select=Barcode, drop=T) & id %in% css)
+		css.c = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.c]], select=Barcode, drop=T) & id %in% css)
+
+		rss.r.refN = tapply(rss.r$refN, as.factor(rss.r$id), sum)
+		rss.r.altN = tapply(rss.r$altN, as.factor(rss.r$id), sum)
+		rss.c.refN = tapply(rss.c$refN, as.factor(rss.c$id), sum)
+		rss.c.altN = tapply(rss.c$altN, as.factor(rss.c$id), sum)
+		r_c.p = p.adjust(apply(cbind(rss.c.refN, rss.c.altN, rss.r.refN, rss.r.altN), 1, function(x) {fisher.test(matrix(x, ncol=2))$p.v}), 'BH')
+		css.r.refN = tapply(css.r$refN, as.factor(css.r$id), sum)
+		css.r.altN = tapply(css.r$altN, as.factor(css.r$id), sum)
+		css.c.refN = tapply(css.c$refN, as.factor(css.c$id), sum)
+		css.c.altN = tapply(css.c$altN, as.factor(css.c$id), sum)
+		c_r.p = p.adjust(apply(cbind(css.r.refN, css.r.altN, css.c.refN, css.c.altN), 1, function(x) {fisher.test(matrix(x, ncol=2))$p.v}), 'BH')
+		mono.celltype_diff.mat[ct.r, ct.c] = sum(r_c.p < 0.05, na.rm=T)  # row (test; ME) compare to col (reference; nonME)
+		mono.celltype_diff.mat[ct.c, ct.r] = sum(c_r.p < 0.05, na.rm=T) # row (test; ME) compare to col (reference; nonME)
+		mono.celltype_diff[[paste0(ct.r,'__',ct.c)]] = r_c.p
+		mono.celltype_diff[[paste0(ct.c,'__',ct.r)]] = c_r.p
+	}
+}
+mono.celltype_diff.mat
+which(mono.celltype_diff[['B__T']] < 0.05)
+which(mono.celltype_diff[['B__NK']] < 0.05)
+which(mono.celltype_diff[['NK__B']] < 0.05)
+which(mono.celltype_diff[['NK__Myeloid']] < 0.05)
+which(mono.celltype_diff[['NK__Ery']] < 0.05)
+which(mono.celltype_diff[['Myeloid__T']] < 0.05)
+which(mono.celltype_diff[['Myeloid__Ery']] < 0.05)
+which(mono.celltype_diff[['Myeloid__HSPC']] < 0.05)
+which(mono.celltype_diff[['Ery__T']] < 0.05)
+which(mono.celltype_diff[['Ery__NK']] < 0.05)
+sites = c('11:117820671', '19:2274768', '8:124563841', '16:89407686', '8:124563841', '2:74153862', '2:74153862', '2:74153862', '19:52689883', '19:52689883')
+
+
+mono.celltype_diff.mat
+which(mono.celltype_diff[['B__T']] < 0.05)
+sapply(mono.celltype_diff, function(x) {which(x<0.05)})
+pdf("Figures.v2/Figure.CelltypeDiff.pdf", height = 2, width = 2)
+sites = c('11:117820671', '19:2274768', '8:124563841', '16:89407686', '2:74153862', '19:52689883')
+filter(annos, id %in% sites)[,1:10]
+# FXYD2, C19orf35, MTSS1, ANKRD11, MOB1A, ZNF83
+par(mar=rep(0.3,4), cex.axis=1.2, cex.lab=1.2)
+pt = 0.3; pt_base = 1.2
+cell_cri4plot = 50
+for(site in sites){
+	ss = subset(hetSNV.cAR.filt[[s]], id == site)
+	if(nrow(ss) < cell_cri4plot){next}
+	plotSite_on_Tsne(site)
+}
+plot(rep(1,5), 1:5, axes=F, pch = 20, lwd = 0, col = 'grey45', cex = log10(c(1:5)) + pt_base, ylim=c(-7,12))
+dev.off()
+# select: 8:124563841 2:74153862 
+
+pdf("Figures.v2/Figure.Celltype.pdf", height = 2, width = 2)
+for(ct in names(mono.type_spec)){
+	sites = filter(annos, id %in% mono.type_spec[[ct]], ! Func.refGene %in% intergenic)[['id']]
+	par(mar=rep(0.3,4), cex.axis=1.2, cex.lab=1.2)
+	pt = 0.3; pt_base = 1.2
+	cell_cri4plot = 50
+	plot(1,1,type='n', xlim=c(0,5), ylim=c(0,6), axes=F, xlab='', ylab='')
+	text(2,4, labels = ct, cex = 1)
+	for(site in sites){
+		ss = subset(hetSNV.cAR.filt[[s]], id == site)
+		if(nrow(ss) < cell_cri4plot){next}
+		plotSite_on_Tsne(site)
+	}
+}
+plot(rep(1,5), 1:5, axes=F, pch = 20, lwd = 0, col = 'grey45', cex = log10(c(1:5)) + pt_base, ylim=c(-7,12))
+dev.off()
+# select: 3:16512845 (T), 5:54074919 (T), 6:118933723/6:118933838 (T), 8:144844570 (T), 3:16398091 (B), 10:93702531 (B), 11:117820671 (B), 15:57280019 (B), 15:90496697 (B), 16:89543164 (B), 7:139047097/7:139047113 (NK), 9:461756 (NK), 16:89407686 (NK), 2:74153862 (Mye/Mono), 6:122451547 (Ery), 11:108209705 (Ery), 19:52689883 (Ery), 2:111484709 (HPSC), 3:39409509 (HPSC), 3:191386516 (HPSC), 6:32517714 (HPSC), 7:139415322 (HPSC), 
+# select: 3:16512845 (T; RFTN1), 8:144844570 (T; ZNF7), 3:16398091 (B), 11:117820671 (B; FXYD2), 15:57280019 (B; TCF12), 9:461756 (NK; DOCK8), 16:89407686 (NK), 2:74153862 (Mye/Mono; MOB1A), 19:52689883 (Ery; ZNF83), 3:39409509 (HPSC; RPSA), 3:191386516 (HPSC; CCDC50), 6:32517714 (HPSC; HLA-DRB5), 
+```
+
+6:32517714 (HLA-DRB5); rs1141867
+3:13401128 (NUP210); rs9884019
+11:117820671 (FXYD2)
+8:124563841 (MTSS1)
+2:74153862 (MOB1A)
+19:52689883 (ZNF83)
+15:57280019 (TCF12); rs183426889
+3:16398099 (RFTN1)
+pie(c(23,6), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 6:32517714 (HLA-DRB5) [bkWGS]; C/T; rs
+pie(c(7,16), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 3:13401128 (NUP210) [bkWGS]; A/G; rs
+pie(c(20,17), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 11:117820671 (FXYD2) [bkWGS]; G/A; rs
+pie(c(14,17), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 8:124563841 (MTSS1) [bkWGS]; A/G; rs
+pie(c(14,11), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 2:74153862 (MOB1A) [bkWGS]; A/G; rs
+pie(c(47,11), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 19:52689883 (ZNF83) [bkWGS]; G/A; rs
+pie(c(13,16), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 15:57280019 (TCF12) [bkWGS]; G/A; rs
+pie(c(7,18), edges=720, col = c('#00008080', '#EE2C2C80'), labels=NA, radius=0.99, init.angle=90, border=NA, clockwise=T) # 3:16398099 (RFTN1) [bkWGS]; C/T; rs
+
+
+
+```{r Celltype_Spec_abandon, include=F, echo=F, tidy=F, eval=F}
+s='S3'
+S3.expr <- read.table('Expr/A11x3.expr',header=T, stringsAsFactors=F)
+S3.expr = data.frame(S3.expr, cellInfo[[s]][,c('Barcode','CellCluster','ReadsCount','SNVs','Muts')])
+S3.expr$Barcode = as.character(S3.expr$Barcode)
+S3.expr = subset(S3.expr, Barcode %in% unique(hetSNV.cAR.filt[[s]]$cell))
+table(S3.expr$ident); table(S3.expr$CellCluster); subset(S3.expr, CellCluster == 1,select=ident, drop=T)
+S3.celltypes <- list('T' = c('0','1','8'), 'B' = c('2','3','6','9','13'), 'NK' = '4', 'Myeloid' = '5', 'Ery' = c('7','12'), 'HSPC' = '11')
+
+hetSNV.cAR.filt.rm_M1 = subset(hetSNV.cAR.filt[[s]], ! id %in% mono_1$S3)
+mono.type_spec <- list()
+pdf("Figures.v2/S3.celltype_specific.rm_M1.pdf",height = 7, width = 7)
+for(ct in names(S3.celltypes)){
+ces = subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T)
+ss0 = subset(hetSNV.cAR.filt.rm_M1, cell %in% ces)
+p_diff = c()
+cf = names(which((table(ss0$id)) >= pm_cri_c))  # filtering by cell number; sites observed in at least pm_cri_c
+ss = subset(ss0, id %in% cf)
+ss.refN = tapply(ss$refN, as.factor(ss$id), sum)
+ss.altN = tapply(ss$altN, as.factor(ss$id), sum)
+ss.Fref = ss.refN[cf]/(ss.refN[cf] + ss.altN[cf])
+
+p_diff = p.adjust(apply(cbind(ss.refN, ss.altN), 1, function(x) {ifelse(sum(x) == 0, 1, chisq.test(matrix(c(ceiling(median(x)), x[1], ceiling(median(x)), x[2]), ncol=2))$p.value)}), method = 'BH')  # test for significantly deviated alleles w.r.t. the expected 0.5 ratio
+
+s.pm = cf[ss.Fref < pm_cri_f | ss.Fref > 1-pm_cri_f]
+
+plot(1,1, type='n', axes=F, xlab='',ylab='', xlim=c(0,5), ylim=c(0,10))
+text(1,7, paste0(s,'-',ct, ': ',signif(length(intersect(names(which(p_diff < 0.05)), s.pm))/length(cf)*100,4),'%'), cex = 0.8)
+text(1,4, paste0('All/Sig/mono_1: ',length(cf), '/', sum(p_diff < 0.05, na.rm=T), '/', length(mono.type_spec[[ct]])))
+
+plot(log(ss.refN+1), log(ss.altN+1) , pch = 20, cex = 0.7, col = ifelse(p_diff < 0.05 & names(ss.refN) %in% s.pm & ss.refN > ss.altN, wes_palettes$Darjeeling2[2], ifelse(p_diff < 0.05 & names(ss.refN) %in% s.pm & ss.refN < ss.altN, wes_palettes$Royal1[2], wes_palettes$Chevalier1[3])), lwd = 0.8, xlim=c(0, max(c(log(ss.refN+1), log(ss.altN+1)))), ylim = c(0, max(c(log(ss.refN+1), log(ss.altN+1)))), xlab = '', ylab = '', las = 1, main = '', cex.axis = 1.33)  # blue for ref, red for alt
+mono.type_spec[[ct]] = intersect(names(which(p_diff < 0.05)), s.pm)
+print(paste0(s,'-',ct, ': ',signif(length(intersect(names(which(p_diff < 0.05)), s.pm))/length(cf)*100,4),'%'))
+# mono_1[[s]] = intersect(names(which(p_diff < 0.05)), s.pm)  # final defination of mono. expr. SNVs: significantly deviated in both alleles and with MAF < pm_cri_f (e.g., 5%)
+print(paste0(length(cf), '/', sum(p_diff < 0.05, na.rm=T), '/', length(mono.type_spec[[ct]])))
+}
+dev.off()
+#[1] "S3-T: 0.1727%"
+#[1] "13896/177/24"
+#[1] "S3-B: 0.144%"
+#[1] "22222/413/32"
+#[1] "S3-NK: 0.3185%"
+#[1] "2826/34/9"
+#[1] "S3-Myeloid: 0.05583%"
+#[1] "1791/35/1"
+#[1] "S3-Ery: 0.151%"
+#[1] "3312/42/5"
+#[1] "S3-HSPC: 0.1664%"
+#[1] "1803/30/3"
+
+upset(fromList(list(
+'B'=mono.type_spec[['B']], 
+'T'=mono.type_spec[['T']], 
+'NK'=mono.type_spec[['NK']], 
+'Mye/Mono'=mono.type_spec[['Myeloid']], 
+'Ery'=mono.type_spec[['Ery']], 
+'HSPC'=mono.type_spec[['HSPC']])), number.angles = 30, point.size = 2, line.size = .7, mb.ratio = c(0.6,0.4), keep.order = T, text.scale = 1.3)
+
+for(ct in names(S3.celltypes)){write((filter(annos, id %in% mono.type_spec[[ct]]))[['Gene.refGene']], paste0('Figures.v2/S3.mono.',ct,'.genes.txt'))}
+
+
+filt.ctN = list()
+for(ct in names(S3.celltypes)){
+ss = subset(S3.expr, Barcode %in% unique(hetSNV.cAR.filt[[s]]$cell))
+filt.ctN[[ct]] = sum(table(ss$ident)[S3.celltypes[[ct]]])
+}
+filt.ctN[['all']] = sum(unlist(filt.ctN))
+mono_1.celltype_enrich.1 <- matrix(NA, ncol = length(S3.celltypes), nrow = length(mono_1[[s]]), dimnames=list(mono_1[[s]], names(S3.celltypes)))
+for(site in mono_1[[s]]){
+for(ct in names(S3.celltypes)){
+ces = subset(hetSNV.cAR.filt[[s]], id == site, select = cell, drop=T)
+ss.0 = nrow(subset(S3.expr, ident %in% S3.celltypes[[ct]] & Barcode %in% ces))
+ss.1 = length(ces) - ss.0
+if(ss.0 > 0){
+mono_1.celltype_enrich.1[site, ct] = fisher.test(matrix(c(filt.ctN[['all']]-filt.ctN[[ct]], ss.1, filt.ctN[[ct]], ss.0), ncol=2), alternative = 'greater')$p.v  # matrix must follow this format to use 'greater' which means its enriched in 'tested' cell type (by odds ratio; the bottom right cornor of the contingency table should be the testing enrichement)
+}else{
+mono_1.celltype_enrich.1[site, ct] = NA
+}
+}
+}
+
+mono_1.celltype_enrich.1.padj = matrix( p.adjust(mono_1.celltype_enrich.1, 'BH'), ncol = ncol(mono_1.celltype_enrich.1), dimnames=dimnames(mono_1.celltype_enrich.1))
+sum(mono_1.celltype_enrich.1.padj < 0.05, na.rm=T)
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'HSPC'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'Myeloid'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'Ery'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'NK'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'B'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% names(which(mono_1.celltype_enrich.1.padj[,'T'] < 0.05)), Func.refGene == 'exonic')[['Gene.refGene']]
+## 这种检验出来的大多是同样ME的site，但是在某个celltype中表达的cell比较多, 意义不是特别大。或者换句话说，同样一个ME site，在所有/多种细胞类型中都表达，但是在某个type中表达更多（富集），或许比较有意思？
+
+
+
+ident2col = c('0'='palegreen1','1' = 'palegreen2','2'='turquoise1','3'='turquoise2','4'='palegreen4','5'='darkgoldenrod1','6'='turquoise','7'='tan4','8'='palegreen3','9'='royalblue1','10'='azure3','11'='blueviolet','12'='tan4','13'='turquoise3')
+ident2col = c('0'='palegreen','1' = 'palegreen','2'='turquoise','3'='turquoise','4'='palegreen4','5'='darkgoldenrod1','6'='turquoise','7'='tan4','8'='palegreen3','9'='royalblue1','10'='azure3','11'='blueviolet','12'='tan4','13'='turquoise') # for paper plot (concise color)
+ident2rgb = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'05'); names(ident2rgb) = names(ident2col)
+ident2rgb = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'05'); names(ident2rgb) = names(ident2col) # for paper plot (concise color)
+
+ident2rgb.d = paste0(apply(col2rgb(ident2col), 2, function(x){rgb(x[1], x[2], x[3], maxColorValue=255)}),'80'); names(ident2rgb.d) = names(ident2col) # for paper plot (concise color)
+ident2rgb.d['10']=NA
+pdf("Figures.v2/Figure.2B.pdf",height=2.1,width=2.1)
+pt = 0.3; pt_base = 1.2
+for(site in setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['HSPC']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['Myeloid']]), mono.type_spec[['Ery']]), mono.type_spec[['T']])){
+ss = subset(hetSNV.cAR.filt[[s]], id == site)
+S3.expr.ss = subset(S3.expr, Barcode %in% subset(hetSNV.cAR.filt[[s]], id == site, select = cell, drop=T))
+ss = ss[match(S3.expr.ss$Barcode, ss$cell),]
+par(mar=rep(0.3,4))
+plot(S3.expr$tsne.x, S3.expr$tsne.y, pch = 20, cex = pt, col = ident2rgb[as.character(S3.expr$ident)], lwd = 0, xlab = '', ylab = '', las = 1, cex.axis=1.33, axes = F)
+if(site %in% row.names(mono_1.celltype_enrich.1.padj)[!is.na(mono_1.celltype_enrich.1.padj[,'HSPC']) & mono_1.celltype_enrich.1.padj[,'HSPC'] < 0.05]){
+box(lwd=2)
+}
+#	axis(1, cex.axis = 1.33, las = 1, line = -0.15, labels=F, tck = -0.01)
+#	axis(2, cex.axis = 1.33, las = 1, line = -0.15, labels=F, tck = -0.01)
+points(S3.expr.ss$tsne.x, S3.expr.ss$tsne.y, pch = 20, lwd = 0, cex = ifelse(ss$refN+ss$altN < 1, 0, ifelse(ss$refN+ss$altN == 1, pt_base, log10(ss$refN+ss$altN)+pt_base)), col = ifelse(ss$refN>0 & ss$altN==0, '#00008080', ifelse(ss$refN==0 & ss$altN>0, '#EE2C2C80', ifelse(ss$refN>0 & ss$altN>0, '#FF8C0095', NA))))
+}
+dev.off()
+
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['HSPC']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['Myeloid']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Myeloid']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['Ery']], mono.type_spec[['B']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Myeloid']]), mono.type_spec[['T']]), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['NK']], mono.type_spec[['B']]), mono.type_spec[['Myeloid']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['B']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['T']]), Func.refGene == 'exonic')[['Gene.refGene']]
+filter(annos, id %in% setdiff(setdiff(setdiff(setdiff(setdiff(mono.type_spec[['T']], mono.type_spec[['Myeloid']]), mono.type_spec[['NK']]), mono.type_spec[['HSPC']]), mono.type_spec[['Ery']]), mono.type_spec[['B']]), Func.refGene == 'exonic')[['Gene.refGene']]
+
+## Compare two manners to get cell type specific MAE
+pdf("Figures.v2/Compare two manners to get cell type specific MAE.pdf", height = 5, width = 5)
+barplot(rbind(c(346, 562, 93, 79, 84, 85),c(24, 32, 9, 1, 5, 3)), beside=T, names.arg=c('T','B','NK','Mye/Mono', 'Ery','HSPC'), las = 1, col=c('grey75','salmon'), border=NA)
+barplot(rbind(c(318, 514, 82, 74, 75, 78),rep(NA, 6)), beside=T, add=T, las = 1, border=NA, col=c('grey25',NA))
+dev.off()
+
+### Celltype specific ME sites differentiation
+#### compare between pairs of celltypes on their shared hetSNVs (satisfied the pm_cri_c) that ME in test celltype but not in reference celltype with significance
+pm_cri_c = 10
+s='S3'
+cf.celltype <- list()
+for(ct in names(S3.celltypes)){
+ces = subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T)
+ss0 = subset(hetSNV.cAR.filt[[s]], cell %in% ces)
+cf.celltype[[ct]] = names(which((table(ss0$id)) >= pm_cri_c))
+}
+
+cts=names(S3.celltypes)
+mono.celltype_diff <- list()
+mono.celltype_diff.mat <- matrix(0, ncol = length(cts), nrow = length(cts), dimnames= list(cts, cts))
+# row as test (ME) and column as reference (nonME)
+for(ri in 1:(length(cts)-1)){
+for(ci in (ri+1):length(cts)){
+ct.r = cts[ri]; ct.c = cts[ci]
+sss = intersect(cf.celltype[[ct.r]], cf.celltype[[ct.c]])
+rss = setdiff(intersect(mono.type_spec[[ct.r]], sss), mono.type_spec[[ct.c]])
+css = setdiff(intersect(mono.type_spec[[ct.c]], sss), mono.type_spec[[ct.r]])
+
+rss.r = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.r]], select=Barcode, drop=T) & id %in% rss)
+rss.c = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.c]], select=Barcode, drop=T) & id %in% rss)
+css.r = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.r]], select=Barcode, drop=T) & id %in% css)
+css.c = subset(hetSNV.cAR.filt[[s]], cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct.c]], select=Barcode, drop=T) & id %in% css)
+
+rss.r.refN = tapply(rss.r$refN, as.factor(rss.r$id), sum)
+rss.r.altN = tapply(rss.r$altN, as.factor(rss.r$id), sum)
+rss.c.refN = tapply(rss.c$refN, as.factor(rss.c$id), sum)
+rss.c.altN = tapply(rss.c$altN, as.factor(rss.c$id), sum)
+r_c.p = p.adjust(apply(cbind(rss.c.refN, rss.c.altN, rss.r.refN, rss.r.altN), 1, function(x) {fisher.test(matrix(x, ncol=2))$p.v}), 'BH')
+css.r.refN = tapply(css.r$refN, as.factor(css.r$id), sum)
+css.r.altN = tapply(css.r$altN, as.factor(css.r$id), sum)
+css.c.refN = tapply(css.c$refN, as.factor(css.c$id), sum)
+css.c.altN = tapply(css.c$altN, as.factor(css.c$id), sum)
+c_r.p = p.adjust(apply(cbind(css.r.refN, css.r.altN, css.c.refN, css.c.altN), 1, function(x) {fisher.test(matrix(x, ncol=2))$p.v}), 'BH')
+mono.celltype_diff.mat[ct.r, ct.c] = sum(r_c.p < 0.05, na.rm=T)  # row (test; ME) compare to col (reference; nonME)
+mono.celltype_diff.mat[ct.c, ct.r] = sum(c_r.p < 0.05, na.rm=T) # row (test; ME) compare to col (reference; nonME)
+mono.celltype_diff[[paste0(ct.r,'__',ct.c)]] = r_c.p
+mono.celltype_diff[[paste0(ct.c,'__',ct.r)]] = c_r.p
+}
+}
+mono.celltype_diff.mat
+which(mono.celltype_diff[['B__T']] < 0.05)
+which(mono.celltype_diff[['NK__B']] < 0.05)
+which(mono.celltype_diff[['NK__Ery']] < 0.05)
+which(mono.celltype_diff[['Myeloid__T']] < 0.05)
+which(mono.celltype_diff[['Ery__T']] < 0.05)
+sites = c('11:117820671', '8:124563841', '8:124563841', '2:74153862', '19:52689883')
+
+
+```
+
+```{r mono_2, include=T, echo=T, tidy=TRUE}
+s='S3'
+## filtering for cell-level M.E. analysis
+umi_cri = 5 # cell with site UMI > umi_cri
+hetSNV.cAR.filt.fu <- list()  # filtering for UMIs
+hetSNV.cAR.filt.fu.s5c5 <- list()  # cells with sites > 4 and sites with cells > 4
+for(s in sample.sg){
+	hetSNV.cAR.filt.fu[[s]] = subset(hetSNV.cAR.filt[[s]], UMI > umi_cri)
+}
+hetSNV.cAR.filt.fu.s5c5[[s]] = subset(hetSNV.cAR.filt.fu[[s]], (id %in% names(which(tapply(hetSNV.cAR.filt.fu[[s]][,'cell'], hetSNV.cAR.filt.fu[[s]][,'id'], length)>4))) & (cell %in% names(which(tapply(hetSNV.cAR.filt.fu[[s]][,'id'], hetSNV.cAR.filt.fu[[s]][,'cell'], length)>4))))
+hetSNV.cAR.filt.fu.UMIaf <- list()
+for(s in sample.sg){
+	hetSNV.cAR.filt.fu.UMIaf[[s]] = (tapply(hetSNV.cAR.filt.fu[[s]][,'altN'], hetSNV.cAR.filt.fu[[s]][,'id'], sum)) / (tapply(hetSNV.cAR.filt.fu[[s]][,'altN']+hetSNV.cAR.filt.fu[[s]][,'refN'], hetSNV.cAR.filt.fu[[s]][,'id'], sum))
+	hetSNV.cAR.filt.fu.UMIaf[[s]][is.na(hetSNV.cAR.filt.fu.UMIaf[[s]])] <- 0
+}
+
+## define monoallelic expr. at single-cell level (i.e., mono_2)
+mono_cri = 0.05 # either allele with fraction < than mono_cri or less than 1
+
+hetSNV.cAR.filt.mono_2 <- list()
+hetSNV.cAR.filt.mono_2.s5c5 <- list()
+for(s in sample.sg){
+	hetSNV.cAR.filt.mono_2[[s]] = subset(hetSNV.cAR.filt.fu[[s]], refN < 1 | altN < 1 | (altN/(refN+altN) < mono_cri) | (altN/(refN+altN) > 1-mono_cri))
+	hetSNV.cAR.filt.mono_2.s5c5[[s]] = subset(hetSNV.cAR.filt.fu.s5c5[[s]], refN < 1 | altN < 1 | (altN/(refN+altN) < mono_cri) | (altN/(refN+altN) > 1-mono_cri))
+}
+
+## mono_2 observed in larger than(>) 1 cell
+stringent_cri = 1
+hetSNV.cAR.filt.mono_2.stringent <- list()
+for(s in sample.sg){
+	hetSNV.cAR.filt.mono_2.stringent[[s]] = subset(hetSNV.cAR.filt.mono_2[[s]], id %in% names(which(table(hetSNV.cAR.filt.mono_2[[s]]$id) > stringent_cri)))
+}
+
+hetSNV.cAR.filt.mono_2.rm_M1 <- list() # remove mono_1 and celltype MAE
+hetSNV.cAR.filt.mono_2.s5c5.rm_M1 <- list() # remove mono_1 and celltype MAE
+hetSNV.cAR.filt.fu.rm_M1 <- list()
+hetSNV.cAR.filt.fu.s5c5.rm_M1 <- list()
+hetSNV.cAR.filt.mono_2.rm_M1[[s]] = subset(hetSNV.cAR.filt.mono_2[[s]], ! id %in% c(mono_1[[s]], unlist(mono.type_spec)))
+hetSNV.cAR.filt.fu.rm_M1[[s]] = subset(hetSNV.cAR.filt.fu[[s]], ! id %in% c(mono_1[[s]], unlist(mono.type_spec)))
+hetSNV.cAR.filt.mono_2.s5c5.rm_M1[[s]] = subset(hetSNV.cAR.filt.mono_2.s5c5[[s]], ! id %in% c(mono_1[[s]], unlist(mono.type_spec)))
+hetSNV.cAR.filt.fu.s5c5.rm_M1[[s]] = subset(hetSNV.cAR.filt.fu.s5c5[[s]], ! id %in% c(mono_1[[s]], unlist(mono.type_spec)))
+
+hetSNV.cAR.filt.mono_2.rm_M1[['S1']] = subset(hetSNV.cAR.filt.mono_2[['S1']], ! id %in% c(mono_1[['S1']]))
+hetSNV.cAR.filt.fu.rm_M1[['S1']] = subset(hetSNV.cAR.filt.fu[['S1']], ! id %in% c(mono_1[['S1']]))
+hetSNV.cAR.filt.mono_2.rm_M1[['S2']] = subset(hetSNV.cAR.filt.mono_2[['S2']], ! id %in% c(mono_1[['S2']]))
+hetSNV.cAR.filt.fu.rm_M1[['S2']] = subset(hetSNV.cAR.filt.fu[['S2']], ! id %in% c(mono_1[['S2']]))
+
+## mono_2 sites across stages (multiple hits of mono_2 sites to reduce the expression burst)
+#multiSGsites = list() # mono_2 sites in more than 1 stage 
+#multiSGsites[['S1']] = unique(subset(hetSNV.cAR.filt.mono_2[['S1']], id %in% unique(c(hetSNV.cAR.filt.mono_2[['S2']]$id, hetSNV.cAR.filt.mono_2[['S3']]$id)))$id)
+#multiSGsites[['S2']] = unique(subset(hetSNV.cAR.filt.mono_2[['S2']], id %in% unique(c(hetSNV.cAR.filt.mono_2[['S1']]$id, hetSNV.cAR.filt.mono_2[['S3']]$id)))$id)
+#multiSGsites[['S3']] = unique(subset(hetSNV.cAR.filt.mono_2[['S3']], id %in% unique(c(hetSNV.cAR.filt.mono_2[['S1']]$id, hetSNV.cAR.filt.mono_2[['S2']]$id)))$id)
+#multiSGsites[['S4']] = character(0)
+## mono_2 sites across stages (multiple hits of mono_2 sites to reduce the expression burst)
+multiSGsites.rm_M1 = list() # mono_2 sites in more than 1 stage 
+multiSGsites.rm_M1[['S1']] = unique(subset(hetSNV.cAR.filt.mono_2.rm_M1[['S1']], id %in% unique(c(hetSNV.cAR.filt.mono_2.rm_M1[['S2']]$id, hetSNV.cAR.filt.mono_2.rm_M1[['S3']]$id)))$id)
+multiSGsites.rm_M1[['S2']] = unique(subset(hetSNV.cAR.filt.mono_2.rm_M1[['S2']], id %in% unique(c(hetSNV.cAR.filt.mono_2.rm_M1[['S1']]$id, hetSNV.cAR.filt.mono_2.rm_M1[['S3']]$id)))$id)
+multiSGsites.rm_M1[['S3']] = unique(subset(hetSNV.cAR.filt.mono_2.rm_M1[['S3']], id %in% unique(c(hetSNV.cAR.filt.mono_2.rm_M1[['S1']]$id, hetSNV.cAR.filt.mono_2.rm_M1[['S2']]$id)))$id)
+length(unique(hetSNV.cAR.filt.mono_2.rm_M1[['S3']]$id)) # 114
+length(unique(subset(hetSNV.cAR.filt.mono_2.rm_M1[['S3']], id %in% unique(c(hetSNV.cAR.filt.mono_2.rm_M1[['S1']]$id, hetSNV.cAR.filt.mono_2.rm_M1[['S2']]$id)))$id)) # 58
+unique(hetSNV.cAR.filt.mono_2.rm_M1[['S1']]$id)
+unique(hetSNV.cAR.filt.mono_2.rm_M1[['S2']]$id)
+unique(hetSNV.cAR.filt.mono_2.rm_M1[['S3']]$id)
+
+
+
+length(unique(filter(annos, id %in% hetSNV.cAR.filt.fu.rm_M1[[s]]$id, ! Func.refGene %in% intergenic)[['Gene.refGene']])) # 176
+length(unique(filter(annos, id %in% hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id, ! Func.refGene %in% intergenic)[['Gene.refGene']])) # 69
+for(cri in 1:5){
+	print(length(unique(filter(annos, id %in% names(which(tapply(hetSNV.cAR.filt.fu.rm_M1[[s]]$cell, as.factor(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), length) > cri)), ! Func.refGene %in% intergenic)[['Gene.refGene']])))
+	print(length(unique(filter(annos, id %in% names(which(tapply(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$cell, as.factor(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id), length) > cri)), ! Func.refGene %in% intergenic)[['Gene.refGene']])))
+} # 36/108; 22/91; 16/77; 13/69; 11/66
+
+length(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)) # 244
+length(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)) # 114
+for(cri in 1:5){
+	print(sum(tapply(hetSNV.cAR.filt.fu.rm_M1[[s]]$cell, as.factor(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), length) > cri))
+	print(sum(tapply(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$cell, as.factor(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id), length) > cri))
+} 
+# 155/57; 129/36; 109/27; 99/21; 95/19
+pdf("Figures.v2/Figure.2B_2a.pdf", height = 5, width = 4)
+fuN = c(176, 108, 91, 77, 69, 66); m2N = c(69, 36, 22, 16, 13, 11)
+par(mar=c(5,4.5,2.5,4.5)+0.1, xaxs='r', yaxs='i', cex.axis=1.2, cex.lab=1.2)
+p = barplot(rbind(m2N, fuN-m2N), beside=F, las = 1, col = wes_palettes$Cavalcanti1[c(2,4)], border=NA, xlim =c(0,7), ylim=c(0,200), ylab = 'Count of rMAE genes', , col.lab = wes_palettes$Cavalcanti1[2], axes=F)
+axis(2, las = 1, col = wes_palettes$Cavalcanti1[2], col.axis=wes_palettes$Cavalcanti1[2])
+par(new=T); plot(p, m2N/fuN*100, type='o', pch = 20, lwd=3, xlim=c(0,7), ylim=c(0,100), axes=F, xlab = '', ylab = '', las = 1, col= wes_palettes$Darjeeling1[4])
+axis(4, las = 1, col = wes_palettes$Darjeeling1[4], col.axis = wes_palettes$Darjeeling1[4])
+mtext(side=4, text='Percentage of rMAEs', line = 2.5, cex = 1.4, col = wes_palettes$Darjeeling1[4])
+fuN = c(244, 155, 129, 109, 99, 95); m2N = c(114, 57, 36, 27, 21, 19)
+par(mar=c(5,4.5,2.5,4.5)+0.1, xaxs='r', yaxs='i', cex.axis=1.2, cex.lab=1.2)
+p = barplot(rbind(m2N, fuN-m2N), beside=F, las = 1, col = wes_palettes$Cavalcanti1[c(2,4)], border=NA, xlim =c(0,7), ylim=c(0,250), ylab = 'Count of rMAEs', , col.lab = wes_palettes$Cavalcanti1[2], axes=F)
+axis(2, las = 1, col = wes_palettes$Cavalcanti1[2], col.axis=wes_palettes$Cavalcanti1[2])
+par(new=T); plot(p, m2N/fuN*100, type='o', pch = 20, lwd=3, xlim=c(0,7), ylim=c(0,100), axes=F, xlab = '', ylab = '', las = 1, col= wes_palettes$Darjeeling1[4])
+axis(4, las = 1, col = wes_palettes$Darjeeling1[4], col.axis = wes_palettes$Darjeeling1[4])
+mtext(side=4, text='Percentage of rMAEs', line = 2.5, cex = 1.4, col = wes_palettes$Darjeeling1[4])
+dev.off()
+
+
+# Fraction of M.E. sites per cell
+MEfrac.rm_M1 = list(); MEfrac.1.rm_M1 = list(); MEfrac.2.rm_M1 = list()
+MEfrac.s5c5.rm_M1 = list(); MEfrac.1.s5c5.rm_M1 = list(); 
+# MEfrac.1 only count for cells with at least 3 'fu' sites
+for(s in 'S3'){
+	MEfrac.rm_M1[[s]] <- c(); MEfrac.1.rm_M1[[s]] <- c(); MEfrac.2.rm_M1[[s]] <- c()
+	MEfrac.s5c5.rm_M1[[s]] <- c(); MEfrac.1.s5c5.rm_M1[[s]] <- c(); 
+	for(ce in unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$cell)){
+		MEfrac.rm_M1[[s]] = append(MEfrac.rm_M1[[s]], nrow(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)))
+		MEfrac.1.rm_M1[[s]] = append(MEfrac.1.rm_M1[[s]], ifelse(nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)) >= 3 , nrow(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)), NA))
+#		MEfrac.2.rm_M1[[s]] = append(MEfrac.2.rm_M1[[s]], nrow(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id %in% multiSGsites[[s]] & cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)))
+	}
+#	ss = subset(hetSNV.cAR.filt.fu.rm_M1[[s]], id %in% filter(annos, ! Gene.refGene %in% imprintG$Gene)[['id']] )
+#	ss2 = subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id %in% filter(annos, ! Gene.refGene %in% imprintG$Gene)[['id']] )
+#	for(ce in unique(ss$cell)){
+#		MEfrac.nImG.rm_M1[[s]] = append(MEfrac.nImG.rm_M1[[s]], nrow(subset(ss2, cell == ce)) / nrow(subset(ss, cell==ce)))
+#	}
+	for(ce in unique(hetSNV.cAR.filt.fu.s5c5.rm_M1[[s]]$cell)){
+		MEfrac.s5c5.rm_M1[[s]] = append(MEfrac.s5c5.rm_M1[[s]], nrow(subset(hetSNV.cAR.filt.mono_2.s5c5.rm_M1[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.s5c5.rm_M1[[s]], cell == ce)))
+		MEfrac.1.s5c5.rm_M1[[s]] = append(MEfrac.1.s5c5.rm_M1[[s]], ifelse(nrow(subset(hetSNV.cAR.filt.fu.s5c5.rm_M1[[s]], cell == ce)) >= 3 , nrow(subset(hetSNV.cAR.filt.mono_2.s5c5.rm_M1[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.s5c5.rm_M1[[s]], cell == ce)), NA))
+	}
+}
+
+MEfrac.s.rm_M1 = list(); MEfrac.s.1.rm_M1 = list()
+# MEfrac.1 only count for cells with at least 3 'fu' sites
+for(s in 'S3'){
+	MEfrac.s.rm_M1[[s]] <- c(); MEfrac.s.1.rm_M1[[s]] <- c()
+	for(ce in unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$cell)){
+		MEfrac.s.rm_M1[[s]] = append(MEfrac.s.rm_M1[[s]], nrow(subset(hetSNV.cAR.filt.mono_2.stringent[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)))
+		MEfrac.s.1.rm_M1[[s]] = append(MEfrac.s.1.rm_M1[[s]], ifelse(nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)) >= 3 , nrow(subset(hetSNV.cAR.filt.mono_2.stringent[[s]], cell == ce)) / nrow(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], cell == ce)), NA))
+	}
+}
+
+summary(MEfrac$S3) # 15.66
+summary(MEfrac.rm_M1$S3) # 7.285
+summary(MEfrac.rm_M1$S3[MEfrac.rm_M1$S3>0]) # 28.57
+summary(MEfrac.s.rm_M1$S3) # 7.285
+
+## cell fraction of M.E. sites 
+cell_dis <- list() # assign each site as M.E./ASE/BAL of the alleles in every cell and count the cell number of each type, i.e., dissecting cells according to the site status in each cell
+for(s in 'S3'){
+	cell_dis[[s]] <- matrix(0, ncol = 5, nrow = length(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)), dimnames= list(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), c('ME_ref','ASE_ref','BAL','ASE_alt','ME_alt')))
+	for(site in unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)){
+		ss = subset(hetSNV.cAR.filt.fu.rm_M1[[s]], id == site)
+		cc = c(0,0,0,0,0) # mono_ref, ASE_ref, BAL, ASE_alt, mono_alt
+		non_mono_r = c() # store non-ME sites, for ASE multiple-test
+		for(r in 1:nrow(ss)){
+			if(nrow(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], cell == ss[r,'cell'] & id == site)) > 0){
+				if(ss[r,'refN'] > ss[r,'altN']){
+					cc[1] = cc[1] + 1
+				}else{
+					cc[5] = cc[5] + 1
+				}
+			}else{
+				non_mono_r = append(non_mono_r, r)
+			}
+		}
+		if(length(non_mono_r) > 0){
+			ase.t = AllelicASE.test(ss[non_mono_r,], 8, 9, padj=T)
+			cc[2] = sum(!is.na(ase.t) & ase.t < 0.05 & (ss[non_mono_r, 'refN'] > ss[non_mono_r, 'altN']))
+			cc[4] = sum(!is.na(ase.t) & ase.t < 0.05 & (ss[non_mono_r, 'refN'] < ss[non_mono_r, 'altN']))
+			cc[3] = sum(is.na(ase.t) | ase.t >= 0.05)
+		}	
+		cell_dis[[s]][site,] = cc
+	}
+}
+
+rgb(235,100,96, maxColorValue=255); rgb(92,188,248, maxColorValue=255); rgb(247,196,82, maxColorValue=255); # ref-color, alt-color, mix-color
+clone_cut = 0.8
+stringent_cri = 1 # ME cell cut-off (>) to be defined
+pdf("Figures.v2/Cell fraction of allele-consistent monoallelic expression - mono_2.rm_M1.pdf", height = 6, width = 6)
+# black circle means mono_2 sites also in mono_1
+for(s in 'S3'){
+	mono12 = intersect(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), mono_1[[s]]) # overlap between mono_1 and mono_2 (global M.E.)
+#	plot(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]), cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]), pch = 20, cex = log10(ifelse(rowSums(cell_dis[[s]]) > 500, 500, rowSums(cell_dis[[s]]))) + 0.5, col = ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] ==0, "#5CBCF870", ifelse(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0, '#EB646070' , ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0, "#F7C45270", NA))), lwd=0, xlab = 'Cell fraction of mono-ref expr.', ylab = 'Cell fraction of mono-alt expr.', las = 1, main = s)
+	plot(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]), cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]), pch = 21, cex = log10(ifelse(rowSums(cell_dis[[s]]) > 500, 500, rowSums(cell_dis[[s]]))) + 0.3, col = ifelse(row.names(cell_dis[[s]]) %in% mono12, 'black',NA), bg = ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] ==0, "#5CBCF870", ifelse(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0, '#EB646070' , ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0, "#F7C45270", NA))), lwd=1.5, xlab = 'Cell fraction of mono-ref expr.', ylab = 'Cell fraction of mono-alt expr.', las = 1, main = s)
+	abline(v=clone_cut, lwd = 1, lty = 2, col="#5CBCF8"); abline(h = clone_cut, lwd = 1, lty = 2, col="#EB6460"); 
+	print(paste0('sites of UMIfilt/Mono_2/ClonalConsist/Mix: ', length(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)), '/', length(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)), '/', sum(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut), '/', sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0)))
+
+#	plot(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]), cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]), pch = 20, cex = log10(ifelse(rowSums(cell_dis[[s]]) > 500, 500, rowSums(cell_dis[[s]]))) + 0.5, col = ifelse(cell_dis[[s]][,'ME_ref'] > stringent_cri & cell_dis[[s]][,'ME_alt'] ==0, "#5CBCF870", ifelse(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > stringent_cri, '#EB646070' , ifelse(cell_dis[[s]][,'ME_ref'] > stringent_cri & cell_dis[[s]][,'ME_alt'] > stringent_cri, "#F7C45270", NA))), lwd=0, xlab = 'Cell fraction of mono-ref expr.', ylab = 'Cell fraction of mono-alt expr.', las = 1, main = paste0(s,' (stringent)'))
+	plot(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]), cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]), pch = 21, cex = log10(ifelse(rowSums(cell_dis[[s]]) > 500, 500, rowSums(cell_dis[[s]]))) + 0.3, col = ifelse((row.names(cell_dis[[s]]) %in% mono12) & (cell_dis[[s]][,'ME_ref'] > stringent_cri | cell_dis[[s]][,'ME_alt'] > stringent_cri),'black',NA), bg = ifelse(cell_dis[[s]][,'ME_ref'] > stringent_cri & cell_dis[[s]][,'ME_alt'] ==0, "#5CBCF870", ifelse(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > stringent_cri, '#EB646070' , ifelse(cell_dis[[s]][,'ME_ref'] > stringent_cri & cell_dis[[s]][,'ME_alt'] > stringent_cri, "#F7C45270", NA))), lwd=1.5, xlab = 'Cell fraction of mono-ref expr.', ylab = 'Cell fraction of mono-alt expr.', las = 1, main = paste0(s,' (stringent)'))
+
+	abline(v=clone_cut, lwd = 1, lty = 2, col="#5CBCF8"); abline(h = clone_cut, lwd = 1, lty = 2, col="#EB6460"); 
+}
+## add side density of the consistant M.E. sites
+s='S3'
+par(omi=rep(0.2,4), mar=rep(3,4))
+mono12 = intersect(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), mono_1[[s]]) # overlap between mono_1 and mono_2 (global M.E.)
+plot(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]), cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]), pch = 21, cex = log10(ifelse(rowSums(cell_dis[[s]]) > 500, 500, rowSums(cell_dis[[s]]))) + 0.3, col = ifelse(row.names(cell_dis[[s]]) %in% mono12, 'black',NA), bg = ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] ==0, "#5CBCF870", ifelse(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0, '#EB646070' , ifelse(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0, "#F7C45270", NA))), lwd=1.5, xlab = '', ylab = '', las = 1, main = '', xlim = c(-0.1, 1.1), ylim=c(-0.1, 1.1), axes=F)
+abline(v=clone_cut, lwd = 1, lty = 2, col="#5CBCF8"); abline(h = clone_cut, lwd = 1, lty = 2, col="#EB6460"); 
+axis(side = 1, las = 1, at = seq(0,1,0.2), line = 0, tck = 0.01, labels=F)
+axis(side = 1, las = 1, at = seq(0,1,0.2), line = -2.5, tick = F)
+axis(side = 2, las = 1, at = seq(0,1,0.2), line = 0, tck = 0.01, labels=F)
+axis(side = 2, las = 1, at = seq(0,1,0.2), line = -2.7, tick = F)
+box()
+
+par(omi=rep(0.2,4), mar=c(12,3,12,3))
+d = density(cell_dis[[s]][,'ME_ref'][cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] ==0] / rowSums(cell_dis[[s]])[cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] ==0], bw=0.05)
+d$x = c(d$x[1] - (d$x[2] - d$x[1]), d$x, d$x[length(d$x)]+(d$x[2] - d$x[1]))
+d$y = c(min(d$y), d$y, min(d$y))
+plot(0,0, xlim = c(-0.1,1.1), ylim = rev(range(d$y)*c(0.95,1.05)*(-1)), axes=F, type = 'n', xlab = '', ylab = '')
+polygon(d$x, d$y*(-1), col = '#5CBCF870', border = '#5CBCF870', fillOddEven = T)
+axis(side = 3, at = c(0,1), lwd = 0, lwd.ticks=0.3, tck = -0.005, labels=F, line = -1)
+par(omi=rep(0.2,4), mar=c(3,12,3,12))
+d = density(cell_dis[[s]][,'ME_alt'][cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0] / rowSums(cell_dis[[s]])[cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0], bw=0.05)
+d$x = c(d$x[1] - (d$x[2] - d$x[1]), d$x, d$x[length(d$x)]+(d$x[2] - d$x[1]))
+d$y = c(min(d$y), d$y, min(d$y))
+plot(0,0, ylim = c(-0.1,1.1), xlim = rev(range(d$y)*c(0.95,1.05)*(-1)), axes=F, type = 'n', xlab = '', ylab = '')
+polygon(d$y*(-1), d$x, col = '#EB646070', border = '#EB646070', fillOddEven = F)
+axis(side = 4, at = c(0,1), lwd = 0, lwd.ticks=0.3, tck = -0.005, labels=F, line = -1)
+par(omi=rep(0.2,4), mar=c(3,12,3,12))
+d = density(cell_dis[[s]][,'ME_alt'][cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0] / rowSums(cell_dis[[s]])[cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0], bw=0.05)
+d$x = c(d$x[1] - (d$x[2] - d$x[1]), d$x, d$x[length(d$x)]+(d$x[2] - d$x[1]))
+d$y = c(min(d$y), d$y, min(d$y))
+plot(0,0, ylim = c(-0.1,1.1), xlim = (range(d$y)*c(0.95,1.05)*(1)), axes=F, type = 'n', xlab = '', ylab = '')
+polygon(d$y*(1), d$x, col = '#F7C45270', border = '#F7C45270', fillOddEven = F)
+axis(side = 2, at = c(0,1), lwd = 0, lwd.ticks=0.3, tck = -0.005, labels=F, line = -1)
+par(omi=rep(0.2,4), mar=c(12,3,12,3))
+d = density(cell_dis[[s]][,'ME_ref'][cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0] / rowSums(cell_dis[[s]])[cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0], bw=0.05)
+d$x = c(d$x[1] - (d$x[2] - d$x[1]), d$x, d$x[length(d$x)]+(d$x[2] - d$x[1]))
+d$y = c(min(d$y), d$y, min(d$y))
+plot(0,0, xlim = c(-0.1,1.1), ylim = (range(d$y)*c(0.95,1.05)*(1)), axes=F, type = 'n', xlab = '', ylab = '')
+polygon(d$x, d$y, col = '#F7C45270', border = '#F7C45270', fillOddEven = F)
+axis(side = 1, at = c(0,1), lwd = 0, lwd.ticks=0.3, tck = -0.005, labels=F, line = -1)
+
+dev.off()
+
+## circular profile of mono_2
+cell_cri4plot = 4 # plot sites with cells > cell_cri4plot
+ggps <- list() 
+	ggps[[s]] <- list(); ggps.u2[[s]] <- list()
+	sites = names(which(table(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id) > cell_cri4plot))
+	for(site in sites){
+		ggps[[s]][[site]] = AllelicCirPlot(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], id %in% site), order = 1, subtitle=site)
+	}
+}
+for(s in sample.sg){
+	pdf(paste0("Figures/Circular profile of Mono_2.rm_M1 - ", s,'.pdf'), height=5, width = 5)
+#	for(p in ggps[[s]]){
+#		print(p)
+#	}
+	for(pi in 1:length(ggps[[s]])){
+		print(ggps[[s]][[pi]])
+	}
+	dev.off()
+}
+
+###
+mono_2.cell.prob <- list()
+for(s in 'S3'){
+	Ps <- c()
+	for(site in unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)){
+		Ps = append(Ps, dbinom(sum(cell_dis[[s]][site,c(1,5)]), sum(cell_dis[[s]][site,]), 0.5^round(median(subset(hetSNV.cAR.filt.fu.rm_M1[[s]], id==site, select = UMI, drop=T)),0)))
+	}
+	mono_2.cell.prob[[s]] = p.adjust(Ps, 'BH')
+}
+
+# mono_ref: -1; Bi: 0; mono_alt: 1
+permute_cell <- list()
+B = 1000
+set.seed(17)
+for(s in 'S3'){
+	permute_cell[[s]] <- list()
+	cellS = unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$cell)
+	cellN = length(cellS)
+	for(b in 1:B){
+		permute_cell[[s]][[b]] <- matrix(ncol=3)
+	}
+	for(site in row.names(cell_dis[[s]])){
+		ces = c(cell_dis[[s]][site,1], sum(cell_dis[[s]][site,2:4]), cell_dis[[s]][site,5], cellN - sum(cell_dis[[s]][site,1:5]))
+		cds = rep(c(-1,0,1,NA), times = ces)
+		for(b in 1:B){
+			perm = sample(cds, replace=F)
+			permute_cell[[s]][[b]] = rbind(permute_cell[[s]][[b]], cbind(rep(site, sum(!is.na(perm))), cellS[!is.na(perm)], perm[!is.na(perm)]))
+		}
+	}
+}
+for(s in 'S3'){
+	for(b in 1:B){
+		permute_cell[[s]][[b]] = permute_cell[[s]][[b]][-1,]
+	}
+}
+
+permute_cell.MEfrac <- list()
+for(s in 'S3'){
+	permute_cell.MEfrac[[s]] = 
+	sapply(permute_cell[[s]], function(b) {
+		sapply(tapply(b[,3], as.factor(b[,2]), table), function(x) {
+			sum(x[names(x)!=0])/(sum(x))
+		})
+	})
+}
+permute_cell.MEfrac.s <- list()
+for(s in 'S3'){
+	permute_cell.MEfrac.s[[s]] = 
+	sapply(permute_cell[[s]], function(b) {
+		sapply(tapply(b[,3], as.factor(b[,2]), table), function(x) {
+			ifelse(sum(x) >= 3, sum(x[names(x)!=0])/(sum(x)), NA)
+		})
+	})
+}
+
+### permute_cell 可以用于对每个fu site看看是否ME 的cell数有显著偏离
+### -> No way. 在permute的时候，保证的是每个site的cell permute，这样ME数目不会变。
+all(unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id) %in% unique(permute_cell[[s]][[13]][,1]))
+
+unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)
+site='1:3595370'
+permute_cell[[s]][[13]][permute_cell[[s]][[13]][,1] == site,]
+cell_dis[[s]][site,]
+#######
+
+summary(sapply(permute_cell.MEfrac[[s]], mean)); mean(MEfrac.rm_M1[[s]])
+summary(sapply(permute_cell.MEfrac[[s]], function(x){mean(x[x>0])})); mean(MEfrac.rm_M1[[s]][MEfrac.rm_M1[[s]]>0])
+pdf("Figures.v2/Proportion of mono_2.rm_M1 per cell TO permutation.pdf", height = 5, width=5)
+for(s in 'S3'){
+	yMax = 0.2
+	plot(0,0, axes=F, xlab = 'Proportion of monoallelic expressing hetSNVs/cell (%)', ylab = 'Density', main = paste0('Compare to permutation - ', s), xlim=c(-0.2,1.2)*100, ylim =c(0,yMax), type = 'n', las = 1)
+	for(b in 1:B){
+		lines(density(permute_cell.MEfrac[[s]][[b]]*100), col = 'grey50', lwd= 0.8)
+	}
+	lines(density(MEfrac.rm_M1[[s]]*100), col = col_palettes[s], lwd= 2.5)
+	axis(2,las=1)
+	axis(1,las=1, at=c(-20,120), labels=F, tck=0)
+	axis(1,las=1, at=seq(0,100,20))
+}
+dev.off()
+## -> more likely random mono-expressed instead of some clusters of cells, except for some global M.E. (imprinted gene?)
+
+
+##
+set.seed(23)
+B=1000
+permute_allele <- list()
+for(s in 'S3'){
+	permute_allele[[s]] <- list()
+	for(b in 1:B){
+		permute_allele[[s]][[b]] <- matrix(ncol=3)
+	}
+	for(site in unique(hetSNV.cAR.filt.fu.rm_M1[[s]]$id)){
+		ssce = subset(hetSNV.cAR.filt.fu.rm_M1[[s]], id == site)
+		rN = sum(ssce$refN); aN = sum(ssce$altN); # rN: total ref-allele counts; aN: total alt-allele counts
+		ceN = ssce$refN+ssce$altN; # celluar total counts
+		aC = sample(c(rep(0,rN), rep(1,aN))); # all alleles matching the total counts, respectively, from which to be sampled (i.e., permutating the ref/alt status matching the cellular total UMI counts), using an initial sampling to avoid the initial ('00..0011..11').
+		for(b in 1:B){
+			# there are cases like s='S1', site='3:155140900', all the alleles are neither ref nor alt, which cause empty sampling of alleles and the corresponding cells
+			## The first way is to set these cell with '0' counts of two alleles
+			mEmp = matrix(0, nrow = length(ceN), ncol = 3, dimnames = list(levels(as.factor(ssce$cell)), c('refN.perm','altN.perm','id'))); mEmp[,'id'] = site
+			mEmp[levels(as.factor(rep(ssce$cell, ceN))), c('refN.perm','altN.perm','id')] = matrix(unlist(tapply(sample(aC), as.factor(rep(ssce$cell, ceN)), function(x) {c(sum(x==0), sum(x==1), site)})), ncol = 3, byrow=T, dimnames=list(levels(as.factor(rep(ssce$cell, ceN))), c('refN.perm','altN.perm','id')))
+			permute_allele[[s]][[b]] = rbind(permute_allele[[s]][[b]], mEmp)
+
+			## The second way is to through these cells
+#			permute_allele[[s]][[b]] = rbind(permute_allele[[s]][[b]], matrix(unlist(tapply(sample(aC), as.factor(rep(ssce$cell, ceN)), function(x) {c(sum(x==0), sum(x==1), site)})), ncol = 3, byrow=T, dimnames=list(levels(as.factor(rep(ssce$cell, ceN))), c('refN.perm','altN.perm','id'))))
+		}
+	}
+}
+
+for(s in 'S3'){
+	for(b in 1:B){
+		permute_allele[[s]][[b]] = permute_allele[[s]][[b]][-1,]
+	}
+}
+
+permute_allele_mono2 <- list()
+for(s in 'S3'){
+	permute_allele_mono2[[s]] <- list()
+	for(b in 1:B){
+		x = data.frame('cell' = row.names(permute_allele[[s]][[b]]), 'refN' = as.numeric(permute_allele[[s]][[b]][,1]), 'altN' = as.numeric(permute_allele[[s]][[b]][,2]), 'id' = as.character(permute_allele[[s]][[b]][,3]))
+		permute_allele_mono2[[s]][[b]] = subset(x, refN < 1 | altN < 1 | (altN/(refN+altN) < mono_cri) | (altN/(refN+altN) > 1-mono_cri))
+		permute_allele_mono2[[s]][[b]]$cell = as.character(permute_allele_mono2[[s]][[b]]$cell)
+		permute_allele_mono2[[s]][[b]]$id = as.character(permute_allele_mono2[[s]][[b]]$id)
+	}
+}
+
+
+
+
+permute_allele_cell_dis <- list() # assign each site as M.E./ASE/BAL of the alleles in every cell and count the cell number of each type, i.e., dissecting cells according to the site status in each cell
+for(s in 'S3'){
+	permute_allele_cell_dis[[s]] <- list()
+	for(b in 1:B){
+		bdf = data.frame('cell' = row.names(permute_allele[[s]][[b]]), 'refN' = as.numeric(permute_allele[[s]][[b]][,1]), 'altN' = as.numeric(permute_allele[[s]][[b]][,2]), 'id' = as.character(permute_allele[[s]][[b]][,3]))
+		bdf$cell=as.character(bdf$cell); bdf$id=as.character(bdf$id)
+		permute_allele_cell_dis[[s]][[b]] <- matrix(0, ncol = 5, nrow = length(unique(bdf$id)), dimnames= list(unique(bdf$id), c('ME_ref','ASE_ref','BAL','ASE_alt','ME_alt')))
+		for(site in unique(bdf$id)){
+			ss = subset(bdf, id == site)
+			cc = c(0,0,0,0,0) # mono_ref, ASE_ref, BAL, ASE_alt, mono_alt
+			non_mono_r = c() # store non-ME sites, for ASE multiple-test
+			for(r in 1:nrow(ss)){
+				if(nrow(subset(permute_allele_mono2[[s]][[b]], cell == ss[r,'cell'] & id == site)) > 0){
+					if(ss[r,'refN'] > ss[r,'altN']){
+						cc[1] = cc[1] + 1
+					}else{
+						cc[5] = cc[5] + 1
+					}
+				}else{
+					non_mono_r = append(non_mono_r, r)
+				}
+			}
+			if(length(non_mono_r) > 0){
+				ase.t = AllelicASE.test(ss[non_mono_r,], 2, 3, padj=T)
+				cc[2] = sum(!is.na(ase.t) & ase.t < 0.05 & (ss[non_mono_r, 'refN'] > ss[non_mono_r, 'altN']))
+				cc[4] = sum(!is.na(ase.t) & ase.t < 0.05 & (ss[non_mono_r, 'refN'] < ss[non_mono_r, 'altN']))
+				cc[3] = sum(is.na(ase.t) | ase.t >= 0.05)
+			}	
+			permute_allele_cell_dis[[s]][[b]][site,] = cc
+		}
+	}
+}
+
+
+permute_allele.MEfrac = list()
+for(s in 'S3'){
+	permute_allele.MEfrac[[s]] <- list()
+	for(b in 1:B){
+		permute_allele.MEfrac[[s]][[b]] <- numeric(0)
+		ces = sapply(strsplit(row.names(permute_allele[[s]][[b]]),'.', fixed=T),function(x){x[1]})
+		for(ce in unique(ces)){
+			permute_allele.MEfrac[[s]][[b]] = append(permute_allele.MEfrac[[s]][[b]], nrow(subset(permute_allele_mono2[[s]][[b]], cell == ce)) / sum(ces==ce))
+		}
+	}
+}
+permute_allele.MEfrac.s = list()
+for(s in 'S3'){
+	permute_allele.MEfrac.s[[s]] <- list()
+	for(b in 1:B){
+		permute_allele.MEfrac.s[[s]][[b]] <- numeric(0)
+		ces = sapply(strsplit(row.names(permute_allele[[s]][[b]]),'.', fixed=T),function(x){x[1]})
+		for(ce in unique(ces)){
+			permute_allele.MEfrac.s[[s]][[b]] = append(permute_allele.MEfrac.s[[s]][[b]], ifelse(sum(ces==ce) >= 3, nrow(subset(permute_allele_mono2[[s]][[b]], cell == ce)) / sum(ces==ce), NA))
+		}
+	}
+}
+
+summary(sapply(permute_allele.MEfrac[[s]], function(x){mean(x[x>0])}))  # mean: 0.2226
+1 - (mean(MEfrac.rm_M1[[s]][MEfrac.rm_M1[[s]]>0]) - 0.2226)/mean(MEfrac.rm_M1[[s]][MEfrac.rm_M1[[s]]>0])  # 0.5967197
+
+summary(sapply(permute_allele.MEfrac[[s]], function(x){mean(x)}))  # mean: 0.03250
+1 - (mean(MEfrac.rm_M1[[s]]) - 0.03250)/mean(MEfrac.rm_M1[[s]])  # 0.4460969
+summary(sapply(permute_allele.MEfrac$S3, mean)) # 0.03250
+pdf("Figures.v2/Figure.3B.pdf", height = 5, width = 5)
+for(s in 'S3'){
+	par(bty='l', cex.axis=1.2, cex.lab=1.2, mar=c(5,4,3,2), omi=rep(0.2,4))
+	yMax = 0.12
+#	plot(0,0, axes=F, xlab = 'Percentage of rMAEs/cell (%)', ylab = 'Density', main = paste0('Compare to permutation of allele - ', s), xlim=c(-0.2,1.2)*100, ylim =c(0,yMax), type = 'n', las = 1)
+	plot(0,0, axes=F, xlab = 'Percentage of rMAEs/cell (%)', ylab = 'Density', main = '', xlim=c(-0.2,1.2)*100, ylim =c(0,yMax), type = 'n', las = 1)
+	for(b in 1:B){
+		lines(density(permute_allele.MEfrac$S3[[b]]*100, bw=3), col = 'grey50', lwd= 0.6)
+	}
+#	lines(density(MEfrac$S3*100,bw=3), col = col_palettes[s], lwd= 2.5)
+	lines(density(MEfrac.rm_M1$S3*100,bw=3), col = col_palettes[s], lwd= 2.5)
+	axis(2,las=1)
+	axis(1,las=1, at=c(-20,120), labels=F, tck=0)
+	axis(1,las=1, at=seq(0,100,20))
+	
+	# regional 
+	par(mar=c(6,4,7,2))
+	plot(0,0, axes=F, xlab = '', ylab = '', main = '', xlim=c(-0.1,1.2)*100, ylim =c(0,0.015), type = 'n', las = 1)
+	for(b in 1:B){
+		lines(density(permute_allele.MEfrac$S3[[b]]*100, bw=3), col = 'grey50', lwd= 0.6)
+	}
+#	lines(density(MEfrac$S3*100,bw=3), col = col_palettes[s], lwd= 2.5)
+	lines(density(MEfrac.rm_M1$S3*100,bw=3), col = col_palettes[s], lwd= 2.5)
+	axis(2,las=1)
+	axis(1,las=1, at=c(-10,120), labels=F, tck=0)
+	axis(1,las=1, at=seq(0,100,20))
+
+	par(omi=rep(0.4,4), mar=c(4,7,4,6), cex.lab=1.4, cex.axis=1.4)
+	boxplot(sapply(permute_allele.MEfrac$S3, function(x) {mean(x)})*100,pch=20, ylim=c(0.02,0.08)*100, col = 'grey50', las = 1, ylab = 'Average percentage of rMAEs(%)')
+	points(1,mean(MEfrac.rm_M1$S3)*100,pch=20,cex=2,col=col_palettes[s])
+
+	par(mar=c(5,4,3,2), omi=rep(0.2,4), cex.lab=1.2, cex.axis=1.2)
+	yMax = 0.04
+	plot(0,0, axes=F, xlab = 'Percentage of rMAEs/cell (%)', ylab = 'Density', main = '', xlim=c(-0.2,1.2)*100, ylim =c(0,yMax), type = 'n', las = 1)
+	for(b in 1:B){
+		lines(density(permute_allele.MEfrac$S3[[b]][permute_allele.MEfrac$S3[[b]]>0]*100, bw=5), col = 'grey50', lwd= 0.6)
+	}
+#	lines(density(MEfrac$S3[MEfrac$S3>0]*100,bw=5), col = col_palettes[s], lwd= 2.5)
+	lines(density(MEfrac.rm_M1$S3[MEfrac.rm_M1$S3>0]*100,bw=5), col = col_palettes[s], lwd= 2.5)
+	axis(2,las=1)
+	axis(1,las=1, at=c(-20,120), labels=F, tck=0)
+	axis(1,las=1, at=seq(0,100,20))
+	par(omi=rep(0.4,4), mar=c(4,7,4,6), cex.lab=1.4, cex.axis=1.4)
+	boxplot(sapply(permute_allele.MEfrac$S3, function(x) {mean(x[x>0])})*100, pch=20, ylim=c(0.1,0.5)*100, col = 'grey50', las = 1, ylab = 'Average percentage of rMAEs(%)')
+	points(1,mean(MEfrac.rm_M1$S3[MEfrac.rm_M1$S3>0])*100, pch=20, cex=2, col=col_palettes[s])
+}
+dev.off()
+
+m2pp.perm <- list() # mono_2 pooling to test for ASE for perm
+for(s in 'S3'){
+	m2pp.perm[[s]] <- list()
+	for(b in 1:B){
+		m2pp.perm[[s]][[b]] = AllelicASE.test(data.frame('refN' = tapply(as.numeric(permute_allele[[s]][[b]][,'refN.perm']), as.factor(permute_allele[[s]][[b]][,'id']), sum), 'altN' = tapply(as.numeric(permute_allele[[s]][[b]][,'altN.perm']), as.factor(permute_allele[[s]][[b]][,'id']), sum) ), 1, 2)
+	}
+}
+m2pp <- list()
+for(s in 'S3'){
+	m2pp[[s]] = AllelicASE.test(data.frame('refN' = tapply(hetSNV.cAR.filt.fu.rm_M1[[s]]$refN, as.factor(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), sum), 'altN' = tapply(hetSNV.cAR.filt.fu.rm_M1[[s]]$altN, as.factor(hetSNV.cAR.filt.fu.rm_M1[[s]]$id), sum)), 1, 2)
+}
+
+# compare real mono_2 to permute mono_2 (significance)
+names(which(m2pp.perm[[s]][[5]] > 0.05))
+permute_allele[[s]][[6]][permute_allele[[s]][[6]][,'id'] %in% names(which(m2pp.perm[[s]][[5]] > 0.05)),]
+all(names(which(m2pp[[s]]>0.05)) == names(which(m2pp.perm[[s]][[5]] > 0.05)))  # 由permute的方式决定，permute allele不影响两个allele的总count数，所以pooling到一起做ASE test不会有改变。
+
+sapply(permute_allele_mono2[[s]], function(x) {length(unique(x$id))})
+unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)
+pdf("Figures.v2/Mono_2.rm_M1 number compare to permutate_allele mono_2.rm_M1 number.pdf", height = 4, width = 4)
+for(s in 'S3'){
+	plot(density(sapply(permute_allele_mono2[[s]], function(x) {length(unique(x$id))})), lwd = 2, col = 'cornflowerblue', xlab = "Number of mono_2", ylab = "Density", main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles', axes=F, xlim = round(range(c(sapply(permute_allele_mono2[[s]], function(x) {length(unique(x$id))}), length(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)))) * c(0.95, 1.05), 0))
+	abline(v = length(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id)), lwd = 3, col = 'lightcoral')
+	axis(side = 2, las = 1); axis(side = 1, las = 1)
+
+	# dissect into ME_ref, ME_alt, and Mix
+	sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] == 0)
+	sum(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0)
+	sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0)
+	sum(cell_dis[[s]][,'ME_ref'] > 1 & cell_dis[[s]][,'ME_alt'] > 1)
+	sum(permute_allele_cell_dis[[s]][[b]][,'ME_ref'] > 0 & permute_allele_cell_dis[[s]][[b]][,'ME_alt'] == 0)
+
+	plot(density(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] > 0 & x[,'ME_alt'] == 0)})), lwd = 2, col = 'cornflowerblue', xlab = "Number of mono_2.ref", ylab = "Density", main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles', axes=F, xlim = round(range(c(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] > 0 & x[,'ME_alt'] == 0)}), sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] == 0))) * c(0.95, 1.05), 0))
+	abline(v=sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] == 0), lwd = 3, col = 'lightcoral')
+	axis(side = 2, las = 1); axis(side = 1, las = 1)
+	plot(density(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] == 0 & x[,'ME_alt'] > 0)})), lwd = 2, col = 'cornflowerblue', xlab = "Number of mono_2.alt", ylab = "Density", main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles', axes=F, xlim = round(range(c(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] == 0 & x[,'ME_alt'] > 0)}), sum(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0))) * c(0.8, 1.2), 0))
+	abline(v=sum(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0), lwd = 3, col = 'lightcoral')
+	axis(side = 2, las = 1); axis(side = 1, las = 1)
+	plot(density(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] > 0 & x[,'ME_alt'] > 0)})), lwd = 2, col = 'cornflowerblue', xlab = "Number of mono_2.Mix", ylab = "Density", main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles', axes=F, xlim = round(range(c(sapply(permute_allele_cell_dis[[s]], function(x) {sum(x[,'ME_ref'] > 0 & x[,'ME_alt'] > 0)}), sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0))) * c(0.7, 1.3), 0))
+	abline(v=sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0), lwd = 3, col = 'lightcoral')
+	axis(side = 2, las = 1); axis(side = 1, las = 1)
+
+	# Only compare within those are pooling-nonASE mono_2 sites
+	## These sites are nonASE by pooled across cells but observed as M.E. sites in some cells not by chance.
+	if(s=='S3'){
+		hist(sapply(permute_allele_mono2[[s]], function(x) {length(intersect(unique(x$id), names(which(m2pp[[s]]>0.05))))}), breaks = 21, col = 'azure3', border='azure2', xlab = 'Bin of mono_2 sites', ylab = 'Frequency', main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles - nonASE (all)', xlim = c(50,90), las = 1)
+		abline(v = length(intersect(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id), names(which(m2pp[[s]]>0.05)))), lwd = 3, col = 'navy')
+
+		hist(sapply(permute_allele_cell_dis[[s]], function(x) {length(intersect(row.names(x)[(x[,'ME_ref'] > 0 & x[,'ME_alt'] == 0)], names(which(m2pp[[s]]>0.05))))}), breaks = 21, col = '#5CBCF840', border='#5CBCF820', xlab = 'Bin of mono_2 sites', ylab = 'Frequency', main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles - nonASE (ref)', xlim = c(20,60), las = 1)
+		abline(v = length(intersect(row.names(cell_dis[[s]])[(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] == 0)], names(which(m2pp[[s]]>0.05)))), lwd = 3, col = 'navy')
+
+		hist(sapply(permute_allele_cell_dis[[s]], function(x) {length(intersect(row.names(x)[(x[,'ME_ref'] == 0 & x[,'ME_alt'] > 0)], names(which(m2pp[[s]]>0.05))))}), breaks = 21, col = '#EB646030', border='#EB646015', xlab = 'Bin of mono_2 sites', ylab = 'Frequency', main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles - nonASE (alt)', xlim = c(10,35), las = 1)
+		abline(v = length(intersect(row.names(cell_dis[[s]])[(cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0)], names(which(m2pp[[s]]>0.05)))), lwd = 3, col = 'navy')
+
+		hist(sapply(permute_allele_cell_dis[[s]], function(x) {length(intersect(row.names(x)[(x[,'ME_ref'] > 0 & x[,'ME_alt'] > 0)], names(which(m2pp[[s]]>0.05))))}), breaks = 11, col = '#F7C45275', border='#F7C45230', xlab = 'Bin of mono_2 sites', ylab = 'Frequency', main = 'Emperical mono_2# compare to\nmono_2# by permutating alleles - nonASE (mix)', xlim = c(0,20), las = 1)
+		abline(v = length(intersect(row.names(cell_dis[[s]])[(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0)], names(which(m2pp[[s]]>0.05)))), lwd = 3, col = 'navy')
+	}
+}
+dev.off()
+
+## 挑选pooling-nonASE的mono_2 sites，那些有多个(>4)cell被观察到的位点，
+
+names(which(tapply(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$cell, as.factor(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$id), length) > 3))
+cell_dis[[s]][names(which(tapply(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$cell, as.factor(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$id), length) > 3)),]  # empirical
+b=5;permute_allele_cell_dis[[s]][[b]][names(which(tapply(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$cell, as.factor(subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]], id%in%names(which(m2pp[[s]]>0.05)))$id), length) > 4)),] # permute
+
+
+sum(cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_alt'] > 0) # 25
+sum(cell_dis[[s]][,'ME_ref'] > 1 & cell_dis[[s]][,'ME_alt'] > 1) # 10
+sum(cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut) # 32
+sum((cell_dis[[s]][,'ME_alt'] == 0 & cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut) | (cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut)) # 32
+sum((cell_dis[[s]][,'ME_alt'] == 0 & cell_dis[[s]][,'ME_ref'] > 0 & cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) < 0.1) | (cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt'] > 0 & cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) < 0.1)) # 24
+#mono12 = intersect(unique(hetSNV.cAR.filt.mono_2.rm_M1[[s]]$id), mono_1[[s]])  # mono_2 in mono_1; 33
+#cell_dis[[s]][mono12,'ME_ref']/rowSums(cell_dis[[s]][mono12,])
+#cell_dis[[s]][mono12,'ME_alt']/rowSums(cell_dis[[s]][mono12,])
+#intersect(mono12, names(which((cell_dis[[s]][,'ME_alt'] == 0 & cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut) | (cell_dis[[s]][,'ME_ref'] == 0 & cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut)))) # mono_2 in mono_1 pass clone_cut; (31; =33-2), the other 2 were > 0.6
+pdf("Figures.v2/Figure.2B_2b.pdf", height = 4, width = 4)
+par(mar=rep(0.1,4))
+pie(c(15,10,24,33,32), edges=360, clockwise=T, labels=NA, init.angle=90, col = c(rgb(250, 192, 61, maxColorValue = 255), rgb(219, 155, 52, maxColorValue = 255), rgb(174, 208, 238, maxColorValue = 255), rgb(110, 155, 197, maxColorValue = 255), rgb(53, 78, 107, maxColorValue = 255)), border=NA, radius=1) # 仓庚鸣 + 黑鸠
+dev.off()  # use omnigraffle to pull out the mono12 parts
+25/114; 1-0.2192982; 0.7807018 
+
+sites = row.names(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,])
+cellARM=subset(hetSNV.cAR.filt.mono_2.rm_M1[[s]],id %in% sites)
+which(rowSums(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,])>1)
+subset(cellARM, id %in% names(which(rowSums(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,])>1)))
+cellARM = cellARM[order(cellARM[,8] + cellARM[,9], cellARM[,8]/(cellARM[,8] + cellARM[,9])),]
+cellDF = data.frame('CellID' = rep(cellARM[,5],2), 'UMI' = c((ifelse(cellARM[,8]+cellARM[,9] == 1, circle_base, log10(cellARM[,8]+cellARM[,9])))*(cellARM[,8]/(cellARM[,8]+cellARM[,9])), (ifelse(cellARM[,8]+cellARM[,9] == 1, circle_base, log10(cellARM[,8]+cellARM[,9])))*(cellARM[,9]/(cellARM[,8]+cellARM[,9]))), 'Allele' = rep(c('ref','alt'), each = nrow(cellARM)), 'id' = rep(1:nrow(cellARM), 2))
+cellDF[cellDF$CellID %in% subset(cellARM, id %in% names(which(rowSums(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,])>1)))[,'cell'],]
+for(site in names(which(rowSums(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,])>1))){
+	print(site)
+	print(cell_dis[[s]][cell_dis[[s]][,'ME_ref']/rowSums(cell_dis[[s]]) > clone_cut | cell_dis[[s]][,'ME_alt']/rowSums(cell_dis[[s]]) > clone_cut,][site,])
+	print(cellDF[cellDF$CellID %in% subset(cellARM, id == site)[,'cell'],])
+}
+
+pdf("Figures.v2/OneAlleleMono_2.hiFrac.pdf", height = 5, width = 5)
+AllelicCirPlot(cellARM=cellARM, order=2)
+AllelicCirPlot(cellARM=cellARM, order=1)
+dev.off()
+
+
+```
+
+
+
+```{r revision}
+
+length(unique(hetSNV.cAR.filt.mono_2.rm_M1$S3$id)) # 114
+length(unique(hetSNV.cAR.filt.mono_2.rm_M1$S3$cell)) # 1105
+all((hetSNV.cAR.filt.mono_2.rm_M1$S3$cell) %in% rownames(S3.expr))
+
+subset(S3.expr, Barcode %in% (hetSNV.cAR.filt.mono_2.rm_M1$S3$cell))  # scMAEs in cells
+table(subset(S3.expr, Barcode %in% (hetSNV.cAR.filt.mono_2.rm_M1$S3$cell), select = ident, drop=T))
+
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$T, select=Barcode, drop=T), select = id)) # 34
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$B, select=Barcode, drop=T), select = id)) # 59
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$NK, select=Barcode, drop=T), select = id)) # 16
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$Myeloid, select=Barcode, drop=T), select = id)) # 24
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$Ery, select=Barcode, drop=T), select = id)) # 33
+table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$HSPC, select=Barcode, drop=T), select = id)) # 34
+
+pdf("Figures.v2/Upset plot of cell type scMAEs.pdf", height = 7, width = 8)
+tt.col = ident2col[c('2','0','4','5','7','11')]
+names(tt.col) = c('B','T','NK','Mye/Mono','Ery','HSPC')
+upset(fromList(list(
+'B'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$B, select=Barcode, drop=T), select = id))), 
+'T'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$T, select=Barcode, drop=T), select = id))),
+'NK'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$NK, select=Barcode, drop=T), select = id))),
+'Mye/Mono'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$Myeloid, select=Barcode, drop=T), select = id))),
+'Ery'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$Ery, select=Barcode, drop=T), select = id))),
+'HSPC'=names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes$HSPC, select=Barcode, drop=T), select = id))))), nsets = 7, number.angles = 30, point.size = 3, line.size = 1, mb.ratio = c(0.65,0.35), keep.order = T, text.scale = 2.1, sets.bar.color = tt.col[c('B','HSPC','T','Ery','Mye/Mono','NK')])
+dev.off()
+
+for(ct in names(S3.celltypes)){
+#	write(unique(unlist(strsplit(annos[annos$id %in% names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T), select = id))),'Gene.refGene'][['Gene.refGene']],';'))), paste0('scMAE.celltype_',ct,'.genes.txt'))
+	write(unique(unlist(strsplit(annos[annos$id %in% names(table(subset(hetSNV.cAR.filt.mono_2.rm_M1$S3, cell %in% subset(S3.expr, ident %in% S3.celltypes[[ct]], select=Barcode, drop=T), select = id))) & (!(annos$Func.refGene %in% intergenic)),'Gene.refGene'][['Gene.refGene']],';'))), paste0('scMAE.celltype_',ct,'.genes.txt'))
+}
+
+
+## Gene expression
+S3.geneMat <- read.table('Expr/exp_A11x3_filter1_clean_log.txt', header=F, stringsAsFactors=F)
+S3.gene <- read.table('Expr/gene_clean.txt', header=F, row.names=1, stringsAsFactors=F)
+sum(apply(S3.geneMat[,c(-1,-2)], 1, sum) > 1) # 7244
+
+for(ct in names(S3.celltypes)){
+	write(S3.gene$V2[apply(S3.geneMat[(S3.expr$ident %in% S3.celltypes[[ct]]), c(-1,-2)], 2, sum) > 0], paste0('Expr/S3.',ct,'.expr.genes.txt'))
+}
+
+
+
+
+```
+
+m1.p = c(-7.55528182, -6.937702862, -6.447761004, -5.678059116, -5.604250214, -5.254048255, -5.236171986, -4.972440428, -4.896015455, -4.877576955, -4.80070929, -4.632431108, -4.501111448, -4.352443425, -4.332300899, -4.103804431, -3.965660766, -3.904805825, -3.863012005, -3.800114887)
+m1.t = c('GO:0002764', 'GO:0072594', 'GO:0006607', 'GO:1902532', 'GO:0031098', 'ko04650', 'WP481', 'ko05014', 'R-HSA-1280218', 'GO:0042766', 'R-HSA-912631', 'GO:0051129', 'GO:0031334', 'GO:0010942', 'R-HSA-2559583', 'GO:0090036', 'ko04070', 'R-HSA-2871809', 'GO:0009267', 'WP4949')
+m1.d = c('immune response-regulating signaling pathway', 'establishment of protein localization to organelle', 'NLS-bearing protein import into nucleus', 'negative regulation of intracellular signal transduction', 'stress-activated protein kinase signaling cascade', 'Natural killer cell mediated cytotoxicity', 'Insulin Signaling', 'Amyotrophic lateral sclerosis (ALS)', 'Adaptive Immune System', 'nucleosome mobilization', 'Regulation of signaling by CBL', 'negative regulation of cellular component organization', 'positive regulation of protein complex assembly', 'positive regulation of cell death', 'Cellular Senescence', 'regulation of protein kinase C signaling', 'Phosphatidylinositol signaling system', 'FCERI mediated Ca+2 mobilization', 'cellular response to starvation', '16p11.2 proximal deletion syndrome')
+
+pdf("/Users/furuiqing/Workspace/Project/MonoallelicExpr/manuscript/Figures/Figure.Metascape.Mono_1.pdf", height = 5, width = 7)
+par(mar=c(2.1,10.1,1.1,10.6), omi = rep(0,4),xpd=T)
+plot(0,0,type='n',axes=F,xlab='',ylab='',xlim=c(0,8),ylim=c(0,38))
+abline(v=-log10(0.01), lty=1, col='grey70')
+pos = barplot(rev(c(m1.p)*(-1)), horiz = T, col = rev(rep(c(paste0(wes_palettes$FantasticFox1[4],80)), c(length(m1.p)))), border=NA, space=0.8, xlim=c(0,8), las = 1, names.arg = rev(m1.t), cex.names = 1.2, cex.axis=1.1, add=T)
+text(0, pos[,1]+0.5, pos=4, labels = rev(m1.d), cex=1, offset = 0.05, xpd=T)
+dev.off()
+
+B.p = c(-5.628899113, -3.546689557, -3.519194024, -3.208784484, -2.847817999, -2.584348239, -2.581289603, -2.203826844, -2.078928034)
+B.t = c('R-HSA-202430', 'WP231', 'hsa04970', 'WP179', 'GO:0051092', 'GO:0050657', 'GO:0030036', 'GO:0006839', 'GO:0051650')
+B.d = c('Translocation of ZAP-70 to Immunological synapse', 'TNF alpha Signaling Pathway', 'Salivary secretion', 'Cell Cycle', 'positive regulation of NF-kappaB transcription factor activity', 'nucleic acid transport', 'actin cytoskeleton organization', 'mitochondrial transport', 'establishment of vesicle localization')
+# with BACKGROUND genes
+B.p = c(-4.959977623, -3.291975203, -2.779789336, -2.49826486, -2.445262946, -2.204080992)
+B.t = c('R-HSA-202430', 'hsa04970', 'WP231', 'hsa04310', 'WP179', 'GO:0051092')
+B.d = c('Translocation of ZAP-70 to Immunological synapse', 'Salivary secretion', 'TNF alpha Signaling Pathway', 'Wnt signaling pathway', 'Cell Cycle', 'positive regulation of NF-kappaB transcription factor activity')
+
+
+pdf("/Users/furuiqing/Workspace/Project/MonoallelicExpr/manuscript/Figures/Figure.Metascape.B.pdf", height = 5, width = 7)
+par(mar=c(2.1,10.1,1.1,10.6), omi = rep(0,4),xpd=T)
+plot(0,0,type='n',axes=F,xlab='',ylab='',xlim=c(0,6),ylim=c(0,18))
+abline(v=-log10(0.01), lty=1, col='grey70')
+pos = barplot(rev(c(B.p)*(-1)), horiz = T, col = rev(rep(c(paste0(wes_palettes$FantasticFox1[4],80)), c(length(B.p)))), border=NA, space=0.8, xlim=c(0,6), las = 1, names.arg = rev(B.t), cex.names = 1.2, cex.axis=1.1, add=T)
+text(0, pos[,1]+0.5, pos=4, labels = rev(B.d), cex=1, offset = 0.05, xpd=T)
+dev.off()
+
+
+write.table((filter(annos, id %in% unique(hetSNV.cAR.filt.mono_2.rm_M1$S3$id), ! Func.refGene %in% intergenic)[,1:11]), 'Figures.v2/hetSNV.cAR.filt.mono_2.rm_M1.S3.txt', quote=F, sep='\t', col.names=T, row.names=F)
+
+#### write
+
+write.table(filter(annos, id %in% mono_1$S3)[,1:11], 'S3.Mono_1.genes.bed', quote=F, sep='\t', col.names=T, row.names=T)
+for(ct in names(mono.type_spec)){write.table(filter(annos, id %in% mono.type_spec[[ct]])[,1:11], paste0("S3.Celltype.MAE.rm_M1.",ct,".genes.bed"), sep='\t', quote=F, col.names=T, row.names=F)}
+write.table(filter(annos, id %in% unique(hetSNV.cAR.filt.mono_2$S3$id))[,1:11], 'S3.Mono_2.genes.bed', quote=F, sep='\t', col.names=T, row.names=F)
+write.table(filter(annos, id %in% unique(hetSNV.cAR.filt.mono_2.rm_M1$S3$id))[,1:11], 'S3.Mono_2.rm_M1.genes.bed', quote=F, sep='\t', col.names=T, row.names=F)
+
